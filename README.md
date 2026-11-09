@@ -7,7 +7,10 @@ runs locally on your computer.
 
 ## Download
 
-**Preview 0.3.5 — no Python installation required.**
+**Published download: Preview 0.3.5 — no Python installation required.**
+
+The source on `main` is version **0.3.33** with the changes described below.
+The published downloads are older and do not yet include these updates.
 
 | Your computer | Download | Requirements |
 | --- | --- | --- |
@@ -39,6 +42,16 @@ review. This is a preview, not a claim of general compatibility with every libra
 - Open an existing encrypted Rekordbox 6/7 `master.db` without an XML export.
 - Detect the usual database location or choose a custom location manually.
 - Load regular playlists with their parent-folder names and original track order.
+- Use **Choose playlists…** to search and select several playlists, then **Set cues + grid**.
+  Shared tracks appear once in the combined review and import. Changing the selection clears
+  current analysis and edits; switching tracks within the combined list preserves them.
+- Import confirmation lists each scanned playlist with Scanned, Import and Skip counts
+  (plus already Imported counts after a partial import). Shared tracks count in each
+  playlist but are imported once. Imports are blocked if results or playlist selection
+  no longer match the original scan. Cues and grids belong to tracks, so changes also
+  appear wherever those tracks are used; playlist membership is unchanged.
+- **Show details** opens a scrollable
+  list of tracks and review reasons; skipped tracks are left unchanged.
 - Display track title, artist, genre, BPM, duration, existing cues and analysis issues.
 - Change the connected library from the workspace.
 - Check for Rekordbox/background processes and pending database journals before access.
@@ -49,9 +62,19 @@ review. This is a preview, not a claim of general compatibility with every libra
 - Play/pause local audio, seek by clicking the waveform, and use Space for transport.
 - Switch tracks with Up/Down, wrapping through the playlist while preserving edits.
 - Zoom up to 64× using buttons, the zoom menu or the mouse wheel, then pan horizontally.
-- Compare the existing grey beat grid with the proposed blue grid.
+- Review the current grid in red: proposed changes after preparation, saved Rekordbox timing beforehand. Beat 1 is thick and beats 2–4 are thin; zoom in to see individual beats.
 - Audition a sample-aligned metronome with bar accents on the proposed grid.
 - Resize the waveform/playlist areas using the draggable divider.
+- Choose a waveform in **Settings → Waveform appearance**: Classic bars, Smooth filled,
+  Frequency-coloured, Three-band, Bass-focused or Stereo. The choice applies immediately
+  and is remembered across restarts without changing cues or grids.
+- Frequency views reuse saved Rekordbox bands when available. The audio fallback uses
+  native-rate filters (bass below 250 Hz, mids 250–2,500 Hz, highs above 2,500 Hz;
+  cutoffs scale down for low sample-rate sources). Orange indicates
+  bass, green mids and blue highs in Frequency-coloured and Three-band views.
+  Bass-focused uses blue over a faint grey amplitude outline. Stereo preserves left/right balance; mono files show
+  one lane. Multichannel files show their first two channels in Stereo. Saved detailed
+  waveforms retain their original sample resolution; audition precise cue points.
 
 ### Beat-grid review
 
@@ -96,22 +119,98 @@ review. This is a preview, not a claim of general compatibility with every libra
 See [cue rules](#cue-rules), [analysis limitations](#analysis-limitations), and
 [backups and local data](#backups-and-local-data) for the exact boundaries.
 
-## Current status: preview 0.3.5
+## Current status: local preview 0.3.33
+
+Choose playlists and select a track to view its saved Rekordbox waveform, grid
+and existing cues immediately. Browsing reads saved analysis and audio header
+metadata only; it does not prepare changes or decode audio. If detailed saved
+data is unavailable, the preview says so. Styles requiring missing bands or stereo
+channels show amplitude until preparation. Playback becomes available after the
+audio timing checks during preparation.
+
+The waveform shows one current beat grid: the proposed grid after preparation,
+or the saved Rekordbox grid beforehand. At beat-level zoom, beat 1 of each 4/4
+bar is thick red and beats 2–4 are thin red. The original and proposed grids are
+not overlaid; whole-track views reduce marks to spaced bar starts for legibility.
+
+Select **Set cues + grid** (or **Set cues** / **Set grid** for
+one operation), review the proposals, then import. Preparation reuses Rekordbox's
+saved detailed waveform, BPM and original grid. It does not rerun key analysis or
+estimate a new tempo in the cue workflow. The audio is still decoded for drop and
+grid timing checks; the same pass provides the Stereo view. Rebuilding markers
+uses the prepared results without rereading audio.
+
+**Ignore tracks with existing cues** skips and hides tracks with saved memory cues,
+hot cues or loops. This option is off by default. Saved cues are checked again at
+scan start; proposed cues remain visible until imported. Ignored tracks are
+excluded from scan and import counts. Uncheck the option to show all tracks again.
+
+After preparation, yellow rows highlight tracks needing review. **Show → Needs
+review only** hides ready/imported tracks; hover a row for its reason. **Confirm
+review**, beside Rebuild, accepts the current markers, grid and cues after listening
+without moving them or importing. It clears automatic detection uncertainty, but
+missing markers, stale cues and invalid grid changes still require correction.
+Manual rebuilding keeps both chosen drop positions and creates cues even when
+the other drop is off the translated grid. The offset is shown for review; BPM
+stays unchanged. Rebuilt tracks remain yellow until **Confirm review** explicitly
+accepts the timings. Automatic preparation still blocks conflicting drop grids.
+Review tracks open at 16× zoom around Drop 1. Confirming advances to the next review track and focuses its first drop; manual zoom and pan are kept while working on the current track. Editing markers cancels their acceptance. **Auto cue review tracks** retries automatic cue placement
+for that group using the existing Rekordbox grids. It leaves ready/imported tracks
+and manual drop edits untouched. This retry checks audio again; it does not change
+grids or import anything. Uncertain drops, unavailable audio and unmatched waveform
+timing remain flagged. Successful retries are labelled **Cues ready**, and the
+import summary explicitly identifies cues-only changes. Filtering does not change
+the scanned playlist scope or limit the import to the visible rows.
+
+Saved PWV5/PWV3 amplitude and PWV7 band data are read without modifying the ANLZ
+files. Detailed samples retain their 150-point-per-second clock. If detailed data
+is missing, malformed or has an incompatible duration, the display explicitly
+labels an audio fallback; missing frequency bands alone are generated from audio.
+Band display scaling is shared across low/mid/high, rather than claiming to match
+Rekordbox's proprietary rendering exactly.
+
+Decoded MP3 audio can omit padding present in Rekordbox's saved timeline. The app
+checks the audio against the saved waveform in five regions and accepts a timing
+translation only when at least three clear matches agree within one saved sample.
+Proposed cues, grid, stereo display and playback then share the saved timeline;
+tempo is unchanged. Uncertain matches block automatic import for manual review.
+
 
 **Direct beat-grid and memory-cue import is enabled for Rekordbox 7.2.19.0342 on macOS.**
 The app reads regular playlists from the encrypted library. With **Fix beat grid**
-enabled, it prepares small timing/drift corrections first, then generates memory
-cues using that grid. One batch import saves both the grid and cues; there is no
+and **Set memory cues** enabled, it shifts the original grid to the first drop
+without changing BPM, checks the second drop against a bar start (25 ms tolerance),
+then generates memory cues at exact grid timestamps. Automatic analysis also checks
+drum timing across the track; ambiguous matches remain flagged. Grid-only analysis
+retains the earlier conservative timing/drift suggestion method. One batch import saves both the grid and cues; there is no
 manual XML workflow. Verified backups cover the database and changed analysis files.
 Audio, existing hot cues and saved loops are preserved.
 
 The writer supports constant-tempo 4/4 local MP3/WAV tracks at 44.1 or 48 kHz.
+Drop detection combines bass-energy changes and drum activity, then searches within
+one bar of each broad candidate for a leading attack with sustained bass contrast.
+When two nearby attacks fit the same bass transition, refinement rejects a much
+weaker pickup immediately before the main attack instead of always choosing the
+earliest candidate. Comparable leading kicks are retained.
+These are kick-like attack heuristics, not isolated drum stems or a trained model.
+Ambiguous transitions and weak rhythmic support are flagged. Review both markers
+and use **Align to Drop 1** or **Align to Drop 2** to immediately put a bar start on
+the chosen marker and rebuild cues. **Snap to kick** selects that drop as the pending
+grid anchor even when its timestamp is already correct; use the matching Align button
+to update the proposed grid. BPM and manually placed markers stay unchanged.
+A disagreement between drops blocks automatic preparation. A manual rebuild keeps
+both chosen markers and allows explicit **Confirm review** after listening. A shift
+cannot fix an incorrect BPM, so accepting the result does not guarantee that both
+drops align with the grid.
 The detector cannot guarantee correct musical drops, bar starts or half/double-time.
 Audition the metronome. Seek to the real first drop and use **Set drop 1 / bar 1 here**
 when bar alignment is wrong, then **Rebuild cues**. This shifts the nearest beat to
 that position and makes it beat 1 without changing tempo. Changing the grid invalidates
-existing cue proposals until rebuilt. Variable-tempo grids, adjustments crossing audio
-boundaries, shared/missing analysis files and unsupported formats are refused.
+existing cue proposals until rebuilt. Drop-based shifts may remove a single beat
+that falls outside the audio boundary; remaining beats keep their spacing. The writer
+validates that this is a boundary trim and updates the ANLZ beat count and lengths.
+Variable-tempo grids, larger boundary changes, shared/missing analysis files and
+unsupported formats are refused.
 Streaming/cloud-synced records and inconsistent cue caches also remain unsupported.
 Other Rekordbox versions and Windows remain read-only. Rekordbox **7.0.9.0007** has not been validated for writing.
 
@@ -157,35 +256,60 @@ Windows and Rekordbox versions; do not attach your library database or music.
    System Settings → Privacy & Security (or System Preferences → Security & Privacy on older macOS). Do not disable Gatekeeper globally.
 3. On the first screen, confirm Rekordbox is closed and your library is backed up.
    Click **Choose database…**, select `master.db`, then **Connect and continue**.
+   The last successful connection is preselected next time; the confirmation
+   remains unchecked. Missing files require choosing a location again, and failed
+   connections do not replace the remembered database. Change library and export
+   diagnostics from the **Settings** page in the top toolbar.
    The playlist workspace opens only after the library and first playlist load.
    Use **Change library…** in the workspace to select a different database.
    The file chooser starts
    at a detected default location when available. Custom library locations can
    be selected manually. Common Mac location: `~/Library/Pioneer/rekordbox/`.
 4. Choose a playlist below the waveform. **Fix beat grid** is enabled by default
-   on a supported installation; keep **Set memory cues** enabled and analyse. Drag the divider between the deck and playlist to resize them. The
+   on a supported installation; keep **Set memory cues** enabled and click **Set cues + grid**. Drag the divider between the deck and playlist to resize them. The
    Up/Down arrows switch tracks and update the preview, wrapping at the ends
    (except while editing time fields or using menus); Backups is in the top toolbar.
 5. Press **Space** to play/pause the selected track (except while editing a text
    or time field). Click the waveform to seek. Use **+ / −**, the zoom menu or scroll over the
-   waveform to zoom up to 64×. Use the horizontal scrollbar to pan. The existing
-   grid is grey and the proposed grid is blue. Enable Metronome for sample-aligned
+   waveform vertically to zoom up to 64×. Scroll sideways with a Mac mouse or
+   trackpad to pan smoothly through the zoomed waveform; the horizontal scrollbar
+   also works. Scrolling follows your system direction setting. Red ticks show one
+   active grid mirrored above and below the waveform: the saved Rekordbox grid
+   before preparation, then the proposed grid. Beat 1 is thick; beats 2–4 are thin.
+   Memory cues have a vertical line and a small triangle flag, without text names
+   on the waveform. The Drop 1/Drop 2 drag handles remain labelled.
+   Zoom in to see each beat; the whole-track view shows fewer markers to stay readable.
+   Saved detailed Rekordbox waveforms retain 150 samples per second and can be
+   viewed before preparing cues. The generated audio fallback uses approximately
+   1 ms peaks. Display detail is reduced to fit the available screen pixels.
+   Enable Metronome for sample-aligned
    clicks on the proposed grid.
 6. Drag the **DROP 1** and **DROP 2** handles to adjust the anchors; they snap to
    beats by default and cannot cross each other. Choose **Snap: Bar** for bar starts,
-   or **Snap: Off** for precise placement between beats. Rebuilding keeps your chosen
-   positions and flags anchors that are not on bar starts; moving a marker does not
-   change the grid. If the grid bar starts are wrong,
-   seek to the actual first drop and click **Set drop 1 / bar 1 here** first. **Zoom to drop 1 / 2** centres the
+   or **Snap: Off** for precise placement between beats. With **Fix beat grid** enabled,
+   **Rebuild grid + cues** shifts the grid to whichever drop you edited last. That
+   marker stays at your chosen millisecond, and the other marker also stays fixed.
+   If the other drop is off-grid, the offset is shown for you to review. BPM is
+   unchanged. Listen to the result, then click **Confirm review** to accept it.
+   With grid correction off, rebuilding preserves the marker positions and changes
+   cues only. Moving a marker alone does not change the grid. If the grid bar starts are wrong,
+   seek to the actual first drop and click **Set drop 1 / bar 1 here** first. **Zoom 1 / 2** centres the
    view on that marker for precise placement. Seconds fields remain available.
-   The **Rebuild cues** button turns amber and says **needed** after a drop edit.
+   **Snap to kick** beside each drop searches the analysed audio for a distinct attack
+   within 0.6 beat (at most 250 ms). Move the marker close to the intended kick first.
+   No clear match leaves the marker unchanged and displays an explanation. Successful
+   snaps preserve the attack time until rebuilding. Listen, then rebuild.
+   The **Rebuild grid + cues** (or **Rebuild cues**) button turns amber and says **needed** after a drop edit.
    Click it to update the 16-bar countdown markers, then review the
    cue list. Moving an anchor requires rebuilding its cues and preserves the edit
-   when switching between tracks. Reopening the app requires fresh analysis.
+   when switching between tracks. **Set cues + grid** runs fresh automatic preparation
+   and replaces manual edits; use Rebuild to retain them. Reopening the app requires
+   fresh preparation.
 7. After checking and editing the playlist, click **Import grids + cues to Rekordbox**
    to save your changes. One final
-   confirmation covers the batch; there are no per-track approval controls.
-   Tracks with analysis errors or cues awaiting a rebuild are explicitly listed
+   confirmation covers the batch. Tracks needing review or manually rebuilt tracks
+   must first be accepted with **Confirm review**.
+   Tracks awaiting review, with analysis errors or cues awaiting a rebuild are explicitly listed
    and skipped. The confirmation shows the backup location. Keep Rekordbox closed
    until the import succeeds, then reopen it to see the saved cues. Unsupported
    file formats or inconsistent database records stop the whole import before

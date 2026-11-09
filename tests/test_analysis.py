@@ -39,6 +39,25 @@ def test_cues_only_never_changes_grid(tmp_path):
     assert not p.can_apply
 
 
+@pytest.mark.parametrize('fix_grid,uncertain_drop', [(False, True), (True, True), (True, False)])
+def test_detection_uncertainty_can_be_confirmed_without_rebuilding(tmp_path, monkeypatch, fix_grid, uncertain_drop):
+    from copy import deepcopy
+    from rekordbox_manager.analysis import confirm_proposal_review
+    from rekordbox_manager.attacks import AttackMatch
+    track = make_track(tmp_path)
+    monkeypatch.setattr('rekordbox_manager.analysis.drop_suggestions', lambda *args: (16.25, 48.25))
+    monkeypatch.setattr('rekordbox_manager.analysis.refine_drop',
+                        lambda y, sr, attacks, target, *args, **kwargs: AttackMatch(target, 'Check the attack', uncertain_drop))
+    monkeypatch.setattr('rekordbox_manager.analysis.rhythm_issue', lambda *args: 'Not enough drum evidence' if not uncertain_drop else '')
+    p = analyse(track, Options(fix_grid, True))
+    assert p.review_note and not p.error and not p.grid_issue and not p.cues_dirty
+    assert not p.ready_to_apply
+    before = deepcopy((p.grid, p.cues, p.first_drop, p.second_drop))
+    confirm_proposal_review(p)
+    assert p.ready_to_apply and p.can_apply
+    assert (p.grid, p.cues, p.first_drop, p.second_drop) == before
+
+
 def test_grid_only_keeps_every_cue(tmp_path):
     track = make_track(tmp_path)
     p = analyse(track, Options(True, False))
@@ -70,15 +89,99 @@ def test_missing_drop_detection_cannot_import_unchanged_cue_list(tmp_path):
     assert p.cues_dirty and not p.ready_to_apply
 
 
-def test_grid_correction_precedes_drop_detection(tmp_path, monkeypatch):
+def test_drop_alignment_uses_original_tempo_not_flux_drift(tmp_path, monkeypatch):
     track = make_track(tmp_path)
     corrected = Grid([.2 + i*.5 for i in range(120)],track.grid.positions.copy())
     monkeypatch.setattr('rekordbox_manager.analysis.grid_suggestion',lambda y,sr,g:(corrected,'Adjusted'))
     seen=[]
-    def drops(y,sr,g):
+    def drops(y,sr,g,attacks):
         seen.append(g)
         return None,None
     monkeypatch.setattr('rekordbox_manager.analysis.drop_suggestions',drops)
     proposal=analyse(track,Options(True,True))
-    assert not proposal.error and seen==[corrected]
-    assert proposal.grid==corrected
+    assert not proposal.error and seen==[track.grid]
+    assert proposal.grid==track.grid
+
+
+@pytest.mark.parametrize('fix_grid',[False,True])
+def test_cue_workflow_reuses_rekordbox_waveforms_and_skips_general_tempo_analysis(tmp_path,monkeypatch,fix_grid):
+    from test_rekordbox_waveforms import saved_files
+    from rekordbox_manager.waveform_data import rekordbox_waveforms
+    track=make_track(tmp_path)
+    track.analysis_paths=saved_files(tmp_path,64)
+    saved=rekordbox_waveforms(track.analysis_paths,64)
+    def forbidden(*args):raise AssertionError('Existing analysis was recomputed')
+    monkeypatch.setattr('rekordbox_manager.waveform_data.audio_waveforms',forbidden)
+    monkeypatch.setattr('rekordbox_manager.analysis.grid_suggestion',forbidden)
+    proposal=analyse(track,Options(fix_grid,True))
+    assert not proposal.error
+    data=proposal.waveform_data
+    assert data.source=='Rekordbox saved waveform' and data.peaks==saved.peaks and data.bands==saved.bands
+    assert data.sample_rate==150 and data.channel_rate==1000
+    assert len(data.channels)==1 and len(data.channels[0])==64000
+    assert proposal.track.bpm==120 and proposal.track.grid==track.grid
+
+
+def test_saved_waveform_offset_applies_to_drop_audio_stereo_and_metronome(tmp_path):
+    from test_rekordbox_waveforms import anlz,tag
+    from rekordbox_manager.analysis import load_audio
+    track=make_track(tmp_path)
+    y,sr=load_audio(track)
+    count=int(len(y)/sr*150)
+    edges=(np.arange(count)*sr/150).astype(int)
+    heights=np.maximum.reduceat(np.abs(y),edges)
+    heights=np.pad(heights/np.max(heights),(8,0))
+    words=(np.round(heights**2*31).astype('>u2')<<2).astype('>u2')
+    ext=anlz(tmp_path/'offset.EXT',tag(b'PWV5',words.tobytes(),2))
+    bands=np.repeat(np.round(heights*127).astype(np.uint8)[:,None],3,axis=1)
+    two=anlz(tmp_path/'offset.2EX',tag(b'PWV7',bands.tobytes(),3))
+    track.analysis_paths=[ext,two]
+    proposal=analyse(track,Options(True,True))
+    assert not proposal.error and track.audio_offset==pytest.approx(8/150)
+    shifted,_=load_audio(track)  # same clock used to render metronome audio
+    assert len(shifted)==len(y)+round(8/150*sr)
+    assert np.argmax(np.abs(shifted))==np.argmax(np.abs(y))+round(8/150*sr)
+    assert len(proposal.waveform_data.channels[0])==64000+round(8/150*1000)
+    first=track.audio_offset
+    analyse(track,Options(True,True))
+    assert track.audio_offset==first  # preparing again must not compound the shift
+
+
+@pytest.mark.parametrize('fix_grid',[False,True])
+@pytest.mark.parametrize('bpm,syncopated',[(128,False),(138,False),(174,True)])
+@pytest.mark.parametrize('weak_pickup',[False,True])
+def test_structural_drops_and_grid_alignment(tmp_path,bpm,syncopated,fix_grid,weak_pickup):
+    sr=8000;beat=60/bpm;lead=.4;bars=120
+    y=np.zeros(round((lead+bars*4*beat)*sr),dtype=np.float32)
+    t=np.arange(round(.18*sr))/sr
+    kick=np.sin(2*np.pi*(80*t-70*t*t))*np.exp(-t*22)*np.minimum(t/.002,1)
+    for i in range(bars*4):
+        if syncopated and i%4 not in (0,2):continue
+        onset=lead+i*beat+(beat/2 if syncopated and i%4==2 else 0)
+        gain=.8 if 32<=i//4<64 or i//4>=96 else .08
+        start=round(onset*sr);size=min(len(kick),len(y)-start)
+        y[start:start+size]+=kick[:size]*gain
+    if weak_pickup:
+        # A weak hit before the real Drop 1 must not move either the grid or cue
+        # off the main attack, even though the long bass windows score similarly.
+        start=round((lead+32*4*beat-.1)*sr)
+        y[start:start+len(kick)]+=kick*.16
+    path=tmp_path/'structured.wav';sf.write(path,y,sr)
+    g=Grid([lead+i*beat+.06 for i in range(bars*4)],[i%4+1 for i in range(bars*4)])
+    original=g.times.copy()
+    track=Track('structured','Structured test','','',path,len(y)/sr,bpm,g)
+    p=analyse(track,Options(fix_grid,True))
+    assert not p.error
+    assert p.first_drop==pytest.approx(lead+32*4*beat,abs=.015)
+    assert p.second_drop==pytest.approx(lead+96*4*beat,abs=.015)
+    assert next(c.time for c in p.cues if c.label=='DROP 1')==p.first_drop
+    assert next(c.time for c in p.cues if c.label=='DROP 2')==p.second_drop
+    assert g.times==original
+    if fix_grid:
+        assert not p.grid_issue, p.grid_issue
+        assert p.ready_to_apply, p.drop_notes
+        assert all(c.time in p.grid.times for c in p.cues)
+        assert p.grid.times[128]==p.first_drop and p.grid.positions[128]==1
+    else:
+        assert p.grid is g
+        assert p.review_note and not p.cues_dirty and any('grid was not moved' in note for note in p.drop_notes)

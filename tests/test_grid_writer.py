@@ -64,6 +64,16 @@ def test_grid_only_preserves_cue_tables_exactly(tmp_path):
     assert {t:rows(lib,t) for t in before}==before
 
 
+@pytest.mark.parametrize('offset',[float('nan'),.3,-.3])
+def test_invalid_audio_timeline_offset_cannot_be_imported(tmp_path,offset):
+    lib,p,store=prepared(tmp_path)
+    p.track.audio_offset=offset
+    before={path:digest(path) for path in [lib.path,*p.track.analysis_paths]}
+    with pytest.raises(SafetyError,match='timeline offset'):
+        lib.apply([p],store)
+    assert {path:digest(path) for path in before}==before
+
+
 def test_grid_failure_rolls_back_every_file(tmp_path,monkeypatch):
     lib,p,store=prepared(tmp_path)
     before={path:digest(path) for path in [lib.path,*p.track.analysis_paths]}
@@ -105,3 +115,38 @@ def test_manual_anchor_sets_bar_start_without_changing_tempo():
 
 def test_malformed_tag_is_rejected():
     with pytest.raises(SafetyError):patch_analysis(b'PMAI',Grid([0,.5],[1,2]),12000)
+
+
+@pytest.mark.parametrize('trim_start',[True,False])
+def test_drop_aligned_boundary_trim_round_trip_and_restore(tmp_path,trim_start):
+    from rekordbox_manager.analysis import rebuild_proposal
+    lib,p,store=prepared(tmp_path,encrypted=True)
+    # The fixture starts at zero and ends at 99.5; use an audio end that
+    # requires removing the last beat for a +100 ms translation.
+    if not trim_start:
+        sf.write(str(p.track.path),np.zeros(round(44100*99.55),dtype=np.int16),44100)
+        p.track=lib.tracks('p')[0]
+        p.track.duration=99.55
+    shift=-.1 if trim_start else .1
+    p.first_drop,p.second_drop=32+shift,80+shift
+    p.options=Options(True,True,True)
+    rebuild_proposal(p)
+    assert p.ready_to_apply and len(p.grid.times)==len(p.track.grid.times)-1
+    p.reviewed=p.grid_approved=True
+    original={path:digest(path) for path in [lib.path,*p.track.analysis_paths]}
+    backup=lib.apply([p],store)
+    saved=lib.tracks('p')[0]
+    assert saved.grid==p.grid and tempo(saved.grid)==12000
+    assert all(c.time in saved.grid.times for c in saved.cues if c.kind=='memory')
+    assert any(c.kind=='hot' for c in saved.cues)
+    lib.restore(store,backup)
+    assert all(digest(path)==value for path,value in original.items())
+
+
+def test_arbitrary_missing_beat_is_refused(tmp_path):
+    lib,p,store=prepared(tmp_path)
+    p.grid=Grid(p.track.grid.times[:-1],p.track.grid.positions[:-1])
+    before=digest(lib.path)
+    with pytest.raises(SafetyError,match='boundary trim'):
+        lib.apply([p],store)
+    assert digest(lib.path)==before

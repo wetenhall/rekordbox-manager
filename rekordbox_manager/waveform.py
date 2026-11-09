@@ -1,12 +1,22 @@
 """Waveform viewport and drop handles with selectable snapping."""
 import math
 
-from PySide6.QtCore import Qt, Signal, QRectF
-from PySide6.QtGui import QColor, QPainter, QPen
+from PySide6.QtCore import Qt, Signal, QRectF, QPointF
+from PySide6.QtGui import QColor, QPainter, QPen, QPolygonF
 from PySide6.QtWidgets import QWidget
+
+from .waveform_data import pixel_peaks
 
 
 class Waveform(QWidget):
+    STYLES = {
+        'classic': ('Classic bars', 'The original single-colour amplitude waveform.'),
+        'filled': ('Smooth filled', 'A continuous, filled amplitude silhouette.'),
+        'frequency': ('Frequency-coloured', 'Bass is orange, mids green and highs blue; mixed colours show their relative strengths.'),
+        'three_band': ('Three-band', 'Separate bass, mid and high lanes using saved Rekordbox band heights when available.'),
+        'bass': ('Bass-focused', 'Bass in blue, with the full waveform faintly behind it. Uses saved Rekordbox band heights when available.'),
+        'stereo': ('Stereo', 'Separate left and right channels on the same scale. Mono files show one lane.'),
+    }
     seek = Signal(float)
     anchor_moved = Signal(int, float)
     drag_started = Signal()
@@ -17,6 +27,7 @@ class Waveform(QWidget):
         super().__init__()
         self.setMinimumHeight(210)
         self.proposal = None
+        self.waveform_style = 'classic'
         self.position = 0.0
         self.zoom = 1
         self.snap_mode = "beat"
@@ -29,11 +40,91 @@ class Waveform(QWidget):
         self.setMouseTracking(True)
         self.setCursor(Qt.PointingHandCursor)
         self.setAccessibleName('Track waveform with draggable first and second drop markers')
-        self.setToolTip('Drag a DROP handle. Choose Beat, Bar or Off snapping below. Click elsewhere to seek. Scroll to zoom.')
+        self.navigation_help = 'Red lines show the current grid: proposed after preparation, otherwise saved Rekordbox timing. Each four-beat bar starts with one thick line, followed by three thin lines. At whole-track zoom, only spaced bar starts are shown. Triangle flags mark memory cues. Zoom in to see every beat. Drag a DROP handle, click elsewhere to seek, scroll vertically to zoom, or scroll sideways to move through the track.'
+        self.setToolTip(self.navigation_help)
 
     @property
     def duration(self):
         return max(self.proposal.track.duration, 1) if self.proposal else 1
+
+    def set_style(self, style):
+        self.waveform_style = style if isinstance(style, str) and style in self.STYLES else 'classic'
+        self.update()
+
+    def draw_audio(self, painter, start, end, mid, amp):
+        """All styles share the same time coordinates and marker overlays."""
+        p = self.proposal
+        width = self.width()
+        data = p.waveform_data
+        peak_duration = len(p.peaks) / data.sample_rate if data and data.sample_rate else self.duration
+        columns = pixel_peaks(p.peaks, peak_duration, start, end, width)
+        style = self.waveform_style
+        painter.save()
+
+        def bars(values, center, amplitude, color):
+            painter.setPen(QPen(QColor(color), 1))
+            for x, peak in enumerate(values):
+                painter.drawLine(x, round(center - amplitude * peak), x, round(center + amplitude * peak))
+
+        def filled(values, center, amplitude, color):
+            polygon = QPolygonF([QPointF(x, center - amplitude * v) for x, v in enumerate(values)] +
+                                [QPointF(x, center + amplitude * values[x]) for x in range(len(values) - 1, -1, -1)])
+            painter.setRenderHint(QPainter.Antialiasing)
+            painter.setPen(Qt.NoPen)
+            painter.setBrush(QColor(color))
+            painter.drawPolygon(polygon)
+            painter.setRenderHint(QPainter.Antialiasing, False)
+
+        legend = self.STYLES[style][0]
+        missing_channels = style == 'stereo' and (not data or not data.channels or not all(data.channels))
+        missing_bands = style in ('frequency', 'three_band', 'bass') and (not data or len(data.bands) != 3 or not all(data.bands))
+        if missing_channels or missing_bands:
+            style = 'classic'
+            legend += ' — showing saved amplitude; prepare cues / grid for this view'
+        if style == 'classic':
+            bars(columns, mid, amp, '#748c9f')
+        elif style == 'filled':
+            filled(columns, mid, amp, '#92b5ce')
+        elif style == 'stereo':
+            count = len(data.channels)
+            for index, channel in enumerate(data.channels):
+                center = mid - amp + (2 * index + 1) * amp / count
+                channel_duration = len(channel) / data.channel_rate if data.channel_rate else self.duration
+                values = pixel_peaks(channel, channel_duration, start, end, width)
+                bars(values, center, amp / count * .88, ('#85bce0', '#c2a4e5')[index])
+                painter.setPen(QColor('#ffffff'))
+                painter.drawText(5, round(center - amp / count * .55), 'Mono' if count == 1 else ('L', 'R')[index])
+            legend += ' — mono source' if count == 1 else ' — left / right'
+        else:
+            bands = [pixel_peaks(band, len(band) / data.band_rate if data.band_rate else self.duration,
+                                 start, end, width) for band in data.bands]
+            colors = ('#f2a052', '#62ca90', '#699de9')
+            if style == 'frequency':
+                palette = [QColor(c) for c in colors]
+                for x, peak in enumerate(columns):
+                    total = sum(band[x] for band in bands)
+                    weights = [band[x] / total for band in bands] if total > 1e-8 else [0, 0, 1]
+                    color = QColor(*(round(sum(w * getattr(c, component)() for w, c in zip(weights, palette)))
+                                     for component in ('red', 'green', 'blue')))
+                    painter.setPen(QPen(color, 1))
+                    painter.drawLine(x, round(mid - amp * peak), x, round(mid + amp * peak))
+                legend += ' — bass: orange · mids: green · highs: blue'
+            elif style == 'bass':
+                bars(columns, mid, amp, '#303b43')
+                filled(bands[0], mid, amp, '#699de9')
+                legend += ' — bass: blue · full amplitude: grey'
+            else:
+                for index, (values, color) in enumerate(zip(bands, colors)):
+                    center = mid - amp + (2 * index + 1) * amp / 3
+                    bars(values, center, amp / 3 * .88, color)
+                    painter.setPen(QColor('#ffffff'))
+                    painter.drawText(5, round(center - amp / 3 * .45), ('Low', 'Mid', 'High')[index])
+        if data:
+            legend = ('Stereo from audio' if style == 'stereo' else data.source) + ' · ' + legend
+        description = legend + '\n' + self.navigation_help
+        if self.toolTip() != description:
+            self.setToolTip(description)
+        painter.restore()
 
     def visible_range(self):
         if self._drag_range is not None:
@@ -99,7 +190,7 @@ class Waveform(QWidget):
             return QRectF()
         x = (time - start) / (end - start) * self.width()
         return QRectF(min(max(0, x - 36), max(0, self.width() - 76)),
-                      4 if number == 1 else 29, 76, 23)
+                      4, 76, 23)
 
     def hit_marker(self, point):
         p = self.proposal
@@ -169,6 +260,25 @@ class Waveform(QWidget):
         if not self.proposal:
             event.ignore()
             return
+        if self._dragging is not None:
+            self._wheel_delta = 0
+            event.accept()
+            return
+        pixels, angles = event.pixelDelta(), event.angleDelta()
+        delta = pixels if not pixels.isNull() else angles
+        if abs(delta.x()) > abs(delta.y()):
+            # Mac touch surfaces provide smooth pixel deltas. Qt has already
+            # applied the user's scrolling direction; do not invert it again.
+            self._wheel_delta = 0
+            start, end = self.visible_range()
+            distance = end - start
+            movement = (pixels.x() / max(1, self.width()) if not pixels.isNull()
+                        else angles.x() / 120 * .1)
+            available = self.duration - distance
+            if available > 0:
+                self.pan((start - movement * distance) / available)
+            event.accept()
+            return
         self._wheel_delta += event.angleDelta().y()
         if abs(self._wheel_delta) >= 120:
             self.zoom_by(1 if self._wheel_delta > 0 else -1, event.position().x())
@@ -177,58 +287,107 @@ class Waveform(QWidget):
 
     def paintEvent(self, event):
         painter = QPainter(self)
-        painter.fillRect(self.rect(), QColor('#090e17'))
+        painter.fillRect(self.rect(), QColor('#121416'))
         p = self.proposal
         if not p or not p.peaks:
-            painter.setPen(QColor('#91a5c1'))
-            painter.drawText(self.rect(), Qt.AlignCenter, 'Analyse a track to view its waveform and cue proposals')
+            painter.setPen(QColor('#a7adb5'))
+            painter.drawText(self.rect(), Qt.AlignCenter, ('Saved detailed waveform unavailable. Set cues / grid to prepare an audio preview.' if p else 'Select a playlist and track to view saved Rekordbox analysis'))
             return
         width, height = self.width(), self.height()
-        mid, amp = height * .64, height * .20
+        # Leave a narrow lane for cue triangles above the tallest grid ticks.
+        has_drop_labels = p.options.set_cues and (p.first_drop is not None or p.second_drop is not None)
+        memories = [c for c in p.cues if c.kind in ('memory', 'memory_loop')]
+        top, bottom = (52 if has_drop_labels else 28 if memories else 18), height - 30
+        flag_tip = top - 16
+        flags = []
+        mid, amp = (top + bottom) / 2, max(1, (bottom - top) / 2)
         start, end = self.visible_range()
         span = end - start
-        lower = max(0, int(start / self.duration * len(p.peaks)))
-        upper = min(len(p.peaks), int(end / self.duration * len(p.peaks)) + 1)
-        painter.setPen(QPen(QColor('#3d82be'), max(1.0, width / max(upper - lower, 1) - .5)))
-        for i in range(lower, upper):
-            x = (i / len(p.peaks) * self.duration - start) / span * width
-            painter.drawLine(int(x), int(mid - amp * p.peaks[i]), int(x), int(mid + amp * p.peaks[i]))
-        if self.zoom >= 8:
-            for grid, color in ((p.track.grid, '#7b8492'), (p.grid, '#88c0ff')):
-                for time, beat in zip(grid.times, grid.positions):
-                    if start <= time <= end:
-                        x = int((time - start) / span * width)
-                        painter.setPen(QPen(QColor(color), 1))
-                        painter.drawLine(x, 78 if beat == 1 else int(mid - 8), x, height - 22 if beat == 1 else int(mid + 8))
+        self.draw_audio(painter, start, end, mid, amp)
         interval = next((v for v in (1, 2, 5, 10, 15, 30, 60, 120, 300, 600) if v >= span / 10), 600)
         tick = math.ceil(start / interval) * interval
         while tick <= end:
             x = int((tick - start) / span * width)
-            painter.setPen(QColor('#1e304a'))
-            painter.drawLine(x, 78, x, height - 20)
-            painter.setPen(QColor('#7f98bb'))
+            painter.setPen(QColor('#33373c'))
+            painter.drawLine(x, top, x, height - 20)
+            painter.setPen(QColor('#979fa8'))
             painter.drawText(x + 3, height - 5, f'{int(tick) // 60}:{int(tick) % 60:02}')
             tick += interval
-        memories = [c for c in p.cues if c.kind in ('memory', 'memory_loop')]
-        for i, cue in enumerate(memories):
-            if not start <= cue.time <= end or cue.label in ('DROP 1', 'DROP 2'):
+        # One active grid avoids interleaving old and shifted beat positions.
+        marks = self.grid_marks(p.grid, start, end, width)
+        if self.zoom >= 8:
+            for x, downbeat in marks:
+                painter.setPen(QPen(QColor(255, 101, 114, 125 if downbeat else 65), 2 if downbeat else 1))
+                painter.drawLine(x, top, x, bottom)
+        for cue in memories:
+            if not start <= cue.time <= end or (p.options.set_cues and cue.label in ('DROP 1', 'DROP 2')):
                 continue
             x = (cue.time - start) / span * width
-            color = QColor('#83ddff' if 'DROP 2' in cue.label else '#63a8ff')
+            color = QColor('#a4c4dc' if 'DROP 2' in cue.label else '#739fc9')
             painter.setPen(QPen(color, 1))
-            painter.drawLine(int(x), 78, int(x), height - 22)
-            painter.drawText(int(min(max(2, x + 4), width - 62)), 62 if i % 2 == 0 else 75, cue.label.replace('DROP ', 'D'))
-        for number, color in ((1, '#63a8ff'), (2, '#83ddff')):
+            painter.drawLine(int(x), flag_tip, int(x), height - 22)
+            flags.append((x, color))
+        for number, color in ((1, '#739fc9'), (2, '#a4c4dc')):
             rect = self.marker_rect(number)
             if rect.isEmpty() or not p.options.set_cues:
                 continue
             x = (self.marker_time(number) - start) / span * width
             painter.setPen(QPen(QColor(color), 2))
             painter.drawLine(int(x), int(rect.bottom()), int(x), height - 22)
+            flags.append((x, QColor(color)))
+            painter.setPen(QPen(QColor(color), 2))
             painter.setBrush(QColor(color))
             painter.drawRoundedRect(rect, 4, 4)
-            painter.setPen(QColor('#071426'))
+            painter.setPen(QColor('#101820'))
             painter.drawText(rect, Qt.AlignCenter, f'DROP {number} ↔')
         painter.setPen(QPen(QColor('#ffffff'), 2))
         x = (self.position - start) / span * width
-        painter.drawLine(int(x), 78, int(x), height - 18)
+        painter.drawLine(int(x), top, int(x), height - 18)
+
+        for above in (True, False):
+            for x, downbeat in marks:
+                color = QColor('#ff6572' if downbeat else '#d45c68')
+                painter.setPen(QPen(color, 2 if downbeat else 1))
+                if above:
+                    painter.drawLine(x, top - (13 if downbeat else 6), x, top + 2)
+                    if downbeat:
+                        painter.fillRect(x - 2, top - 13, 5, 3, color)
+                else:
+                    painter.drawLine(x, bottom - 2, x, bottom + (13 if downbeat else 6))
+                    if downbeat:
+                        painter.fillRect(x - 2, bottom + 10, 5, 3, color)
+
+        # Draw last so a coincident grid or playhead cannot obscure a cue flag.
+        for x, color in flags:
+            self.draw_cue_flag(painter, x, color, flag_tip)
+
+    @staticmethod
+    def draw_cue_flag(painter, x, color, tip):
+        """The downward tip and vertical line share the exact cue timestamp."""
+        painter.save()
+        painter.setRenderHint(QPainter.Antialiasing)
+        painter.setPen(Qt.NoPen)
+        painter.setBrush(color)
+        painter.drawPolygon(QPolygonF([QPointF(x - 5, tip - 8), QPointF(x + 5, tip - 8), QPointF(x, tip)]))
+        painter.restore()
+
+    @staticmethod
+    def grid_marks(grid, start, end, width):
+        """Keep exact source timestamps; thin marks only when zoomed out."""
+        if len(grid.times) < 2 or end <= start:
+            return []
+        beat_width = (grid.times[-1] - grid.times[0]) / (len(grid.times) - 1) * width / (end - start)
+        if beat_width <= 0:
+            return []
+        bar_stride = 1
+        while beat_width * 4 * bar_stride < 12:
+            bar_stride *= 2
+        first_bar = next((i for i, beat in enumerate(grid.positions) if beat == 1), 0)
+        marks = []
+        for index, (time, beat) in enumerate(zip(grid.times, grid.positions)):
+            if not start <= time <= end:
+                continue
+            if beat_width < 6 and (beat != 1 or ((index - first_bar) // 4) % bar_stride):
+                continue
+            marks.append((round((time - start) / (end - start) * width), beat == 1))
+        return marks

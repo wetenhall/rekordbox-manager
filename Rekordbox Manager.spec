@@ -8,7 +8,8 @@ root = Path(SPECPATH)
 version = tomllib.loads((root / 'pyproject.toml').read_text())['project']['version']
 datas = [(str(root / 'build/third-party-notices'), 'third-party-notices'),
          (str(root / 'README.md'), '.'),
-         (str(root / 'rekordbox_manager/assets/icon.png'), 'rekordbox_manager/assets')]
+         (str(root / 'rekordbox_manager/assets/icon.png'), 'rekordbox_manager/assets'),
+         (str(root / 'rekordbox_manager/assets/check.svg'), 'rekordbox_manager/assets')]
 a = Analysis(
     ['run.py'], pathex=[str(root)], binaries=[], datas=datas,
     hiddenimports=['sqlcipher3.dbapi2', 'pyrekordbox.masterdb.database'],

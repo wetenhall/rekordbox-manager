@@ -48,7 +48,7 @@ def rounded_grid(grid):
     return Grid([round(t * 1000) / 1000 for t in grid.times], grid.positions.copy())
 
 
-def align_downbeat(grid, seconds, duration):
+def align_downbeat(grid, seconds, duration, *, trim_edges=False):
     """Explicit user anchor: move the nearest beat to the playhead and call it 1."""
     tempo(grid)
     if not math.isfinite(seconds) or not 0 <= seconds < duration:
@@ -60,13 +60,19 @@ def align_downbeat(grid, seconds, duration):
         raise SafetyError('The playhead is outside the analysed grid.')
     result = rounded_grid(Grid([t + offset for t in grid.times],
                                [(i - index) % 4 + 1 for i in range(len(grid.times))]))
+    anchor = result.times[index]
+    if trim_edges:
+        inside = [(t, p) for t, p in zip(result.times, result.positions) if 0 <= t < duration]
+        if len(inside) < len(grid.times) - 1:
+            raise SafetyError('The shift would remove more than one boundary beat. Review the grid in Rekordbox.')
+        result = Grid([t for t, _ in inside], [p for _, p in inside])
     result.validate()
     if result.times[-1] >= duration:
         raise SafetyError('This adjustment crosses the end of the audio. Correct the grid in Rekordbox.')
-    return result, result.times[index]
+    return result, anchor
 
 
-def patch_analysis(data, grid, bpm, *, dat=False):
+def patch_analysis(data, grid, bpm, *, dat=False, original_count=None):
     header, sections = tags(data)
     output = bytearray(header)
     seen = set()
@@ -79,11 +85,12 @@ def patch_analysis(data, grid, bpm, *, dat=False):
             seen.add(tag)
         if tag == b'PQTZ':
             count = struct.unpack_from('>I', raw, 20)[0] if len(raw) >= 24 else -1
-            if size != 24 or len(raw) != 24 + count * 8 or count != len(grid.times):
+            expected = len(grid.times) if original_count is None else original_count
+            if size != 24 or len(raw) != 24 + count * 8 or count != expected:
                 raise SafetyError('Unsupported beat-grid layout or changed beat count.')
             body = b''.join(struct.pack('>HHI', beat, bpm, round(time * 1000))
                             for time, beat in zip(grid.times, grid.positions))
-            raw = raw[:24] + body
+            raw = raw[:8] + struct.pack('>I', 24 + len(body)) + raw[12:20] + struct.pack('>I', len(grid.times)) + body
         elif tag == b'PQT2':
             if size != 56 or len(raw) < 56 or len(raw) != 56 + struct.unpack_from('>I',raw,40)[0] * 2:
                 raise SafetyError('Unsupported extended grid layout.')
@@ -101,6 +108,10 @@ def stage_grid(proposal, root: Path, stage: Path):
     from .library import read_grid
     import soundfile as sf
     duration = sf.info(str(proposal.track.path)).duration
+    offset = proposal.track.audio_offset
+    if not math.isfinite(offset) or abs(offset) > .25:
+        raise SafetyError('Invalid decoded-audio timeline offset.')
+    duration += offset
     original, grid = proposal.track.grid, proposal.grid
     tempo(original)
     bpm = tempo(grid)
@@ -108,8 +119,24 @@ def stage_grid(proposal, root: Path, stage: Path):
     grid.validate()
     if grid == original:
         return {}, round(proposal.track.bpm * 100)
-    if len(grid.times) != len(original.times) or grid.times[-1] >= duration:
-        raise SafetyError('Grid changes must preserve beat count and stay inside the audio.')
+    if grid.times[-1] >= duration:
+        raise SafetyError('Grid changes must stay inside the audio.')
+    if len(grid.times) != len(original.times):
+        # Only a translated grid with one beat removed outside the audio is
+        # allowed. Reject interior deletions, tempo changes and arbitrary counts.
+        if len(grid.times) != len(original.times) - 1:
+            raise SafetyError('Only one out-of-audio boundary beat may be removed.')
+        valid = False
+        for begin in (0, 1):
+            source = original.times[begin:begin + len(grid.times)]
+            offset = grid.times[0] - source[0]
+            omitted = original.times[0 if begin else -1] + offset
+            if ((omitted < 0 if begin else round(omitted, 3) >= duration)
+                    and abs(offset) <= (original.times[1] - original.times[0]) / 2 + .002
+                    and all(abs(new - old - offset) <= .0011 for old, new in zip(source, grid.times))):
+                valid = True
+        if not valid:
+            raise SafetyError('Changed beat count is not a translated boundary trim.')
     paths = [p.resolve() for p in proposal.track.analysis_paths]
     if len(set(paths)) != len(paths) or not any(p.suffix.upper()=='.EXT' for p in paths):
         raise SafetyError('Missing or duplicate companion analysis files. Reanalyse in Rekordbox.')
@@ -125,7 +152,7 @@ def stage_grid(proposal, root: Path, stage: Path):
             # MessagePack rather than ANLZ and contains no supported grid tags.
             continue
         data = path.read_bytes()
-        patched = patch_analysis(data, grid, bpm, dat=path==dats[0])
+        patched = patch_analysis(data, grid, bpm, dat=path==dats[0], original_count=len(original.times))
         if patched != data:
             relative = str(path.relative_to(root))
             target = stage / relative

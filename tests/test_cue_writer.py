@@ -99,6 +99,34 @@ def test_replace_only_removes_ordinary_memory_cues(tmp_path):
     assert not rows(lib,'djmdCue',"WHERE ID='m'")
 
 
+def test_manually_confirmed_off_grid_cue_imports_exact_timings_with_grid(tmp_path):
+    from rekordbox_manager.analysis import rebuild_proposal, confirm_proposal_review
+    from rekordbox_manager.grid_writer import tempo
+    lib, p, store = fixture_library(tmp_path)
+    # Give this fixture a dedicated analysis file, as real grid imports require.
+    with closing(sqlite3.connect(lib.path)) as db, db:
+        db.execute("UPDATE djmdContent SET AnalysisDataPath=NULL WHERE ID='unrelated'")
+    import numpy as np
+    import soundfile as sf
+    sf.write(p.track.path, np.zeros(8000 * 100, dtype=np.float32), 8000)
+    lib = RekordboxLibrary(lib.path)
+    p.track = lib.tracks('p')[0]
+    p.grid = p.track.grid
+    p.options = Options(True, True)
+    p.first_drop, p.second_drop = 16, 63.948
+    rebuild_proposal(p, manual=True)
+    assert p.review_note and not p.can_apply and not p.cues_dirty
+    before = digest(lib.path)
+    with pytest.raises(SafetyError):
+        lib.apply([p], store)
+    assert digest(lib.path) == before
+    confirm_proposal_review(p)
+    lib.apply([p], store)
+    track = lib.tracks('p')[0]
+    assert next(c.time for c in track.cues if c.label == 'DROP 2') == 63.948
+    assert track.grid == p.grid and tempo(track.grid) == tempo(p.track.grid)
+
+
 @pytest.mark.parametrize('change', ['hot','loop','memory','too_many','nan','duplicate','grid','dirty','unreviewed','range'])
 def test_invalid_proposals_never_touch_live_files(tmp_path,change):
     lib,p,store=fixture_library(tmp_path)

@@ -1,8 +1,14 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from array import array
 from pathlib import Path
 import math
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from .attacks import Attack
+    from .waveform_data import WaveformData
 
 
 @dataclass(frozen=True)
@@ -51,6 +57,7 @@ class Track:
     cues: list[Cue] = field(default_factory=list)
     analysis_paths: list[Path] = field(default_factory=list)
     issues: list[str] = field(default_factory=list)
+    audio_offset: float = 0.
 
 
 @dataclass(frozen=True)
@@ -69,17 +76,26 @@ class Proposal:
     first_drop: float | None = None
     second_drop: float | None = None
     warnings: list[str] = field(default_factory=list)
-    peaks: list[float] = field(default_factory=list)
+    peaks: list[float] | array = field(default_factory=list)
     grid_note: str = "Existing grid retained"
     reviewed: bool = False
     error: str = ""
     grid_approved: bool = False
     cues_dirty: bool = False
     applied: bool = False
+    attacks: list[Attack] = field(default_factory=list)
+    drop_notes: list[str] = field(default_factory=list)
+    grid_issue: str = ""
+    grid_anchor: int = 1
+    first_drop_edited: bool = False
+    second_drop_edited: bool = False
+    waveform_data: WaveformData | None = None
+    review_note: str = ""
+    preserve_drop_positions: bool = False
 
     @property
     def ready_to_apply(self) -> bool:
-        return not self.error and not self.cues_dirty and not self.applied and (self.options.fix_grid or self.options.set_cues)
+        return not self.error and not self.grid_issue and not self.cues_dirty and not self.review_note and not self.applied and (self.options.fix_grid or self.options.set_cues)
 
     @property
     def can_apply(self) -> bool:
