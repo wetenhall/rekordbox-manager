@@ -18,7 +18,8 @@ def test_full_demo_apply_and_restore(tmp_path, fix_grid):
     audio_hash = digest(track.path)
     first, second = track.grid.times[48*4], track.grid.times[144*4]
     cues, _ = plan_cues(track.grid, first, second, track.duration, track.cues, False)
-    p = Proposal(track, Options(fix_grid, True), track.grid, cues, first, second, reviewed=True)
+    p = Proposal(track, Options(fix_grid, True), track.grid, cues, first, second,
+                 reviewed=True, grid_approved=fix_grid)
     backup = library.apply([p], backups)
     changed = library.tracks('house')[0]
     assert sum(c.kind == 'memory' for c in changed.cues) == 10
