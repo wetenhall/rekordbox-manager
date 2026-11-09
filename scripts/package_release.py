@@ -31,7 +31,9 @@ def main():
     output.mkdir(parents=True, exist_ok=True)
     report = output / 'selftest.json'
     report.unlink(missing_ok=True)
-    env = dict(os.environ, QT_QPA_PLATFORM='offscreen')
+    # The offscreen Windows plugin does not load system fonts. Exercise the
+    # shipped native plugin there so screenshot QA verifies readable text too.
+    env = dict(os.environ, QT_QPA_PLATFORM='windows' if sys.platform == 'win32' else 'offscreen')
     completed = subprocess.run([str(executable), '--self-test', '--output-dir', str(output)],
                                env=env, timeout=300)
     if completed.returncode:
