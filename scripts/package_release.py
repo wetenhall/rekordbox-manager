@@ -32,8 +32,13 @@ def main():
     report = output / 'selftest.json'
     report.unlink(missing_ok=True)
     env = dict(os.environ, QT_QPA_PLATFORM='offscreen')
-    subprocess.run([str(executable), '--self-test', '--output-dir', str(output)],
-                   env=env, check=True, timeout=300)
+    completed = subprocess.run([str(executable), '--self-test', '--output-dir', str(output)],
+                               env=env, timeout=300)
+    if completed.returncode:
+        error = output / 'selftest-error.txt'
+        if error.is_file():
+            print(error.read_text(encoding='utf-8'))
+        completed.check_returncode()
     result = json.loads(report.read_text())
     if result.get('passed') is not True:
         raise RuntimeError('Packaged-app self-test did not pass.')

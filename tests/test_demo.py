@@ -9,7 +9,8 @@ from rekordbox_manager.backups import BackupStore, digest
 from rekordbox_manager.guards import SafetyError
 
 
-def test_full_demo_apply_and_restore(tmp_path):
+@pytest.mark.parametrize('fix_grid', [False, True])
+def test_full_demo_apply_and_restore(tmp_path, fix_grid):
     library = DemoLibrary(create_demo(tmp_path / "Demo"))
     backups = BackupStore(tmp_path / "Backups")
     track = library.tracks('house')[0]
@@ -17,14 +18,15 @@ def test_full_demo_apply_and_restore(tmp_path):
     audio_hash = digest(track.path)
     first, second = track.grid.times[48*4], track.grid.times[144*4]
     cues, _ = plan_cues(track.grid, first, second, track.duration, track.cues, False)
-    p = Proposal(track, Options(False, True), track.grid, cues, first, second, reviewed=True)
+    p = Proposal(track, Options(fix_grid, True), track.grid, cues, first, second, reviewed=True)
     backup = library.apply([p], backups)
     changed = library.tracks('house')[0]
     assert sum(c.kind == 'memory' for c in changed.cues) == 10
     assert track.cues[0] in changed.cues
     assert changed.grid == track.grid
     assert digest(track.path) == audio_hash
-    assert library.fingerprints['analysis/dnb.json'] == originals['analysis/dnb.json']
+    key = str(Path('analysis/dnb.json'))
+    assert library.fingerprints[key] == originals[key]
     backups.restore(backup, library.root, lambda: None, set(library.fingerprints))
     library.reload()
     assert library.fingerprints == originals

@@ -81,7 +81,7 @@ class DemoLibrary:
             raise ValueError("Not a Manager demo library.")
         self.fingerprints = {"demo-library.json": digest(self.path)}
         for t in self.data["tracks"]:
-            self.fingerprints[t["analysis"]] = digest(self.root / t["analysis"])
+            self.fingerprints[str(Path(t["analysis"]))] = digest(self.root / t["analysis"])
 
     def tracks(self, playlist: str) -> list[Track]:
         result = []
@@ -109,7 +109,7 @@ class DemoLibrary:
                 if proposal.options.fix_grid:
                     dest = stage / f"{t['id']}.json"
                     durable_json(dest, asdict(proposal.grid))
-                    replacements[t["analysis"]] = dest
+                    replacements[str(Path(t["analysis"]))] = dest
                     steps = np.diff(proposal.grid.times)
                     t["bpm"] = round(60 / float(np.median(steps)), 3)
             durable_json(stage / "demo-library.json", proposed)

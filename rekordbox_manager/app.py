@@ -13,7 +13,18 @@ def main():
         parser.add_argument('--self-test', action='store_true')
         parser.add_argument('--output-dir', type=Path, required=True)
         args = parser.parse_args()
-        run(args.output_dir)
+        try:
+            run(args.output_dir)
+        except Exception:
+            # Windowed Windows builds otherwise show a modal traceback dialog,
+            # leaving CI waiting for a person instead of reporting the failure.
+            import traceback
+            args.output_dir.mkdir(parents=True, exist_ok=True)
+            error = traceback.format_exc()
+            (args.output_dir / 'selftest-error.txt').write_text(error, encoding='utf-8')
+            if sys.stderr is not None:
+                print(error, file=sys.stderr)
+            raise SystemExit(1)
         return
     app = QApplication(sys.argv)
     app.setApplicationName("Rekordbox Manager")
