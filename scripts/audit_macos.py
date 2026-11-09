@@ -1,10 +1,14 @@
-"""Fail packaging if any embedded Mach-O requires a newer OS than Monterey."""
+"""Fail if an embedded Mach-O requires a newer OS than the app declares."""
 from pathlib import Path
 from macholib.MachO import MachO
 import sys
+import plistlib
 
 
 def audit(root: Path):
+    info = plistlib.loads((root / 'Contents/Info.plist').read_bytes())
+    parts = tuple(int(p) for p in info['LSMinimumSystemVersion'].split('.'))
+    minimum = (parts + (0, 0))[:3]
     seen, failures, versions = set(), [], {}
     for path in root.rglob('*'):
         if not path.is_file() or path.resolve() in seen:
@@ -21,11 +25,11 @@ def audit(root: Path):
                 value = getattr(body, 'minos', getattr(body, 'version', 0))
                 version = (value >> 16, (value >> 8) & 255, value & 255)
                 versions[version] = versions.get(version, 0) + 1
-                if version > (12, 0, 0):
+                if version > minimum:
                     failures.append(f'{path.relative_to(root)} requires {version}')
     if failures:
-        raise RuntimeError('Monterey compatibility audit failed:\n' + '\n'.join(failures))
-    print('Embedded minimum macOS versions:', versions)
+        raise RuntimeError(f'macOS {minimum} compatibility audit failed:\n' + '\n'.join(failures))
+    print('Declared minimum:', minimum, 'Embedded minimum macOS versions:', versions)
 
 
 if __name__ == '__main__':

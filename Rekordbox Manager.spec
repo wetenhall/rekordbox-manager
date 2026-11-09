@@ -30,5 +30,5 @@ if sys.platform == 'darwin':
                  bundle_identifier='local.rekordboxmanager.preview',
                  info_plist={'CFBundleShortVersionString': version,
                              'CFBundleVersion': version,
-                             'LSMinimumSystemVersion': '12.0',
+                             'LSMinimumSystemVersion': '12.3' if platform.machine() == 'arm64' else '12.0',
                              'NSHighResolutionCapable': True})

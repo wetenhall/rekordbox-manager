@@ -12,7 +12,7 @@ runs locally on your computer.
 | Your computer | Download | Requirements |
 | --- | --- | --- |
 | Windows PC | [Download for Windows](https://github.com/wetenhall/rekordbox-manager/releases/download/v0.3.5/Rekordbox-Manager-0.3.5-Windows-x64.zip) | Windows 10/11, x64; analysis and preview only |
-| Mac with Apple chip (M series) | [Download for Mac — Apple Silicon](https://github.com/wetenhall/rekordbox-manager/releases/download/v0.3.5/Rekordbox-Manager-0.3.5-macOS-Apple-Silicon.zip) | macOS 12 or later |
+| Mac with Apple chip (M series) | [Download for Mac — Apple Silicon](https://github.com/wetenhall/rekordbox-manager/releases/download/v0.3.5/Rekordbox-Manager-0.3.5-macOS-Apple-Silicon.zip) | macOS 12.3 or later |
 | Mac with Intel processor | [Download for Mac — Intel](https://github.com/wetenhall/rekordbox-manager/releases/download/v0.3.5/Rekordbox-Manager-0.3.5-macOS-Intel.zip) | macOS 12 or later |
 
 [Release notes and checksums](https://github.com/wetenhall/rekordbox-manager/releases/tag/v0.3.5)
@@ -270,7 +270,7 @@ are not uploaded. There is no telemetry, cloud processing, or auto-updater.
 
 ## Development
 
-Python 3.12, macOS 12+ or Windows 10/11 (64-bit). Build and test each architecture
+Python 3.12, macOS 12+ on Intel / 12.3+ on Apple Silicon, or Windows 10/11 (64-bit). Build and test each architecture
 separately. Development on Apple Silicon does not produce an Intel executable
 unless an Intel Python and Intel dependencies are used.
 
@@ -307,7 +307,7 @@ python -m pip install --force-reinstall --no-deps --no-index --find-links build/
 ```
 
 The build script audits embedded binaries and fails if any requires macOS newer
-than 12.0. This is a compatibility check, not a substitute for testing on Monterey.
+than the app declares: 12.0 on Intel or 12.3 on Apple Silicon. This is a compatibility check, not a substitute for testing on Monterey.
 
 Set `REKORDBOX_MANAGER_DATA_DIR` to a disposable directory for UI/testing sessions.
 The tests use generated audio, artificial ANLZ files, and plain/encrypted SQLite
@@ -319,7 +319,7 @@ The [GitHub Actions workflow](.github/workflows/build.yml) tests and builds Wind
 x64, Intel Mac and Apple Silicon Mac separately. Each frozen executable must pass
 the synthetic self-test (GUI, analysis, cue editing, demo import/restore, encrypted
 database dependency and media decoder) before its ZIP is uploaded. Mac builds also
-pass the embedded-binary macOS 12 compatibility audit. These checks do not replace
+pass the embedded-binary audit against their declared minimum macOS version. These checks do not replace
 real-library testing on each supported OS/Rekordbox version.
 
 To publish a subsequent preview:

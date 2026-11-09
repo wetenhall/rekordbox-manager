@@ -454,6 +454,7 @@ def test_import_completion_only_after_success(window,tmp_path,monkeypatch,outcom
 
 
 def test_arrows_change_preview_from_deck_and_wrap_preserving_edits(window,tmp_path,monkeypatch):
+    from pathlib import Path
     from PySide6.QtCore import Qt
     from PySide6.QtTest import QTest
     proposals=review_playlist(window,tmp_path,monkeypatch)
@@ -466,7 +467,7 @@ def test_arrows_change_preview_from_deck_and_wrap_preserving_edits(window,tmp_pa
     assert window.rebuild_button.property('needsRebuild')
     QTest.keyClick(window.play,Qt.Key_Down)
     assert window.table.currentRow()==1 and window.wave.proposal is proposals[1]
-    assert sources[-1]==str(proposals[1].track.path)
+    assert Path(sources[-1])==proposals[1].track.path
     assert window.first.value()==160 and window.second.value()==384
     assert not window.rebuild_button.property('needsRebuild')
     QTest.keyClick(window.play,Qt.Key_Up)

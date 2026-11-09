@@ -63,7 +63,8 @@ def replace_file(source: Path, target: Path) -> None:
     temp = target.with_name(target.name + ".manager-" + uuid4().hex)
     try:
         shutil.copy2(source, temp)
-        with temp.open("rb") as f:
+        # Windows _commit (os.fsync) requires a writable file handle.
+        with temp.open("r+b" if os.name == "nt" else "rb") as f:
             os.fsync(f.fileno())
         os.replace(temp, target)
         sync_directory(target.parent)
@@ -112,7 +113,7 @@ class BackupStore:
             dest = contained(folder / "files", relative)
             dest.parent.mkdir(parents=True, exist_ok=True)
             shutil.copy2(source, dest)
-            with dest.open("rb") as f:
+            with dest.open("r+b" if os.name == "nt" else "rb") as f:
                 os.fsync(f.fileno())
             if digest(dest) != before or digest(source) != before:
                 raise SafetyError("A source file changed during backup. Nothing may be applied.")
