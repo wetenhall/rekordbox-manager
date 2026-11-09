@@ -1,0 +1,93 @@
+name: Test and build desktop apps
+on:
+  workflow_dispatch:
+    inputs:
+      publish:
+        description: Publish a preview release after all packages pass
+        type: boolean
+        default: false
+  push:
+    branches: [main]
+    tags: ['v*']
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: desktop-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  desktop:
+    name: ${{ matrix.target }}
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-15-intel
+            target: macOS-Intel
+            architecture: x64
+            wheel-platform: macosx_12_0_x86_64
+          - os: macos-15
+            target: macOS-Apple-Silicon
+            architecture: arm64
+            wheel-platform: macosx_12_0_arm64
+          - os: windows-2022
+            target: Windows-x64
+            architecture: x64
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          architecture: ${{ matrix.architecture }}
+          cache: pip
+          cache-dependency-path: pyproject.toml
+      - name: Install
+        run: python -m pip install -e ".[dev]"
+      - name: Select macOS 12 compatible numerical libraries
+        if: runner.os == 'macOS'
+        run: |
+          python -m pip download --dest build/monterey-wheels --platform ${{ matrix.wheel-platform }} --only-binary=:all: --python-version 312 --implementation cp --no-deps numpy==2.2.6 scipy==1.15.3
+          python -m pip install --force-reinstall --no-deps --no-index --find-links build/monterey-wheels numpy==2.2.6 scipy==1.15.3
+      - name: Test
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: python -m pytest -q
+      - name: Build
+        run: python scripts/build.py
+      - name: Smoke-test packaged app and create download
+        run: python scripts/package_release.py
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.target }}
+          path: dist/release/*
+          if-no-files-found: error
+      - name: Save packaged-app test evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: smoke-${{ matrix.target }}
+          path: build/smoke-*/
+          if-no-files-found: ignore
+
+  release:
+    name: Publish preview downloads
+    needs: desktop
+    if: startsWith(github.ref, 'refs/tags/v') || (github.event_name == 'workflow_dispatch' && inputs.publish)
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: '*'
+          path: artifacts
+      - name: Publish all three verified downloads together
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python3 scripts/publish_release.py artifacts

@@ -1,0 +1,22 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
+  <defs>
+    <linearGradient id="background" x1="0" y1="0" x2="1" y2="1">
+      <stop stop-color="#172b46"/><stop offset="1" stop-color="#050a12"/>
+    </linearGradient>
+    <linearGradient id="blue" x1="0" y1="0" x2="0" y2="1">
+      <stop stop-color="#b2dfff"/><stop offset="1" stop-color="#308aff"/>
+    </linearGradient>
+  </defs>
+  <rect x="64" y="64" width="896" height="896" rx="202" fill="url(#background)"/>
+  <rect x="66" y="66" width="892" height="892" rx="200" fill="none" stroke="#3b5e87" stroke-opacity=".5" stroke-width="4"/>
+  <circle cx="512" cy="512" r="294" fill="none" stroke="#6ab3ff" stroke-opacity=".10" stroke-width="24"/>
+  <circle cx="512" cy="512" r="238" fill="none" stroke="#6ab3ff" stroke-opacity=".09" stroke-width="8"/>
+  <path d="M186 542H838" stroke="#3d77b6" stroke-width="8" stroke-linecap="round"/>
+  <g stroke="url(#blue)" stroke-width="32" stroke-linecap="round">
+    <path d="M198 514V570 M250 478V606 M302 434V650 M354 384V700 M406 454V630 M458 490V594 M510 462V622 M562 502V582 M614 450V634 M666 390V694 M718 438V646 M770 482V602 M822 518V566"/>
+  </g>
+  <g fill="#84c5ff" stroke="#84c5ff" stroke-linejoin="round">
+    <path d="M354 318V756 M666 318V756" fill="none" stroke-width="10"/>
+    <path d="M320 268H388V302L354 338L320 302Z M632 268H700V302L666 338L632 302Z" stroke-width="8"/>
+  </g>
+</svg>
