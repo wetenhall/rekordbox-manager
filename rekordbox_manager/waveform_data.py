@@ -100,7 +100,7 @@ def track_waveforms(track):
     return saved
 
 
-def audio_waveforms(path):
+def audio_waveforms(path, cancelled=None):
     """Native-rate, channel-preserving envelopes with a shared amplitude scale.
 
     Process ten seconds at a time with filter overlap, retaining only 1 ms
@@ -119,6 +119,8 @@ def audio_waveforms(path):
                    for cutoff, kind in ((low, 'lowpass'), ((low, high), 'bandpass'), (high, 'highpass'))]
         overlap = round(sr * .1)
         for start in range(0, source.frames, sr * 10):
+            if cancelled and cancelled():
+                raise InterruptedError('Waveform loading cancelled')
             stop = min(source.frames, start + sr * 10)
             read_start = max(0, start - overlap)
             source.seek(read_start)

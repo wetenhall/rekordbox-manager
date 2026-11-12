@@ -27,6 +27,10 @@ class Waveform(QWidget):
         super().__init__()
         self.setMinimumHeight(210)
         self.proposal = None
+        self.comparison_cues = ()
+        self.comparison_active = False
+        self.saved_cues = ()
+        self.cue_view = 'both'
         self.waveform_style = 'classic'
         self.position = 0.0
         self.zoom = 1
@@ -194,7 +198,7 @@ class Waveform(QWidget):
 
     def hit_marker(self, point):
         p = self.proposal
-        if not p or p.error or not p.options.set_cues:
+        if not p or p.error or not p.options.set_cues or (self.comparison_active and self.cue_view == 'saved'):
             return None
         for number in (1, 2):
             rect = self.marker_rect(number)
@@ -228,6 +232,7 @@ class Waveform(QWidget):
     def mousePressEvent(self, event):
         if event.button() != Qt.LeftButton or not self.proposal:
             return
+        self.setFocus(Qt.MouseFocusReason)
         number = self.hit_marker(event.position())
         if number:
             self._drag_range = self.visible_range()
@@ -295,8 +300,11 @@ class Waveform(QWidget):
             return
         width, height = self.width(), self.height()
         # Leave a narrow lane for cue triangles above the tallest grid ticks.
-        has_drop_labels = p.options.set_cues and (p.first_drop is not None or p.second_drop is not None)
-        memories = [c for c in p.cues if c.kind in ('memory', 'memory_loop')]
+        show_drops = p.options.set_cues or self.comparison_active
+        has_drop_labels = show_drops and (p.first_drop is not None or p.second_drop is not None)
+        memories = [c for c in (self.saved_cues if self.comparison_active else p.cues) if c.kind in ('memory', 'memory_loop')]
+        if self.comparison_active and self.cue_view == 'suggested':
+            memories = []
         top, bottom = (52 if has_drop_labels else 28 if memories else 18), height - 30
         flag_tip = top - 16
         flags = []
@@ -320,26 +328,29 @@ class Waveform(QWidget):
                 painter.setPen(QPen(QColor(255, 101, 114, 125 if downbeat else 65), 2 if downbeat else 1))
                 painter.drawLine(x, top, x, bottom)
         for cue in memories:
-            if not start <= cue.time <= end or (p.options.set_cues and cue.label in ('DROP 1', 'DROP 2')):
+            if not start <= cue.time <= end or (not self.comparison_active and p.options.set_cues and cue.label in ('DROP 1', 'DROP 2')):
                 continue
             x = (cue.time - start) / span * width
-            color = QColor('#a4c4dc' if 'DROP 2' in cue.label else '#739fc9')
+            color = QColor('#ff535f' if self.comparison_active else '#a4c4dc' if 'DROP 2' in cue.label else '#739fc9')
             painter.setPen(QPen(color, 1))
             painter.drawLine(int(x), flag_tip, int(x), height - 22)
             flags.append((x, color))
         for number, color in ((1, '#739fc9'), (2, '#a4c4dc')):
             rect = self.marker_rect(number)
-            if rect.isEmpty() or not p.options.set_cues:
+            if rect.isEmpty() or not show_drops or (self.comparison_active and self.cue_view == 'saved'):
                 continue
+            if self.comparison_active:
+                color = '#efb34f'
             x = (self.marker_time(number) - start) / span * width
             painter.setPen(QPen(QColor(color), 2))
             painter.drawLine(int(x), int(rect.bottom()), int(x), height - 22)
-            flags.append((x, QColor(color)))
+            if not self.comparison_active:
+                flags.append((x, QColor(color)))
             painter.setPen(QPen(QColor(color), 2))
             painter.setBrush(QColor(color))
             painter.drawRoundedRect(rect, 4, 4)
             painter.setPen(QColor('#101820'))
-            painter.drawText(rect, Qt.AlignCenter, f'DROP {number} ↔')
+            painter.drawText(rect, Qt.AlignCenter, f'DROP {number}' + (' ↔' if p.options.set_cues else ''))
         painter.setPen(QPen(QColor('#ffffff'), 2))
         x = (self.position - start) / span * width
         painter.drawLine(int(x), top, int(x), height - 18)
@@ -360,6 +371,13 @@ class Waveform(QWidget):
         # Draw last so a coincident grid or playhead cannot obscure a cue flag.
         for x, color in flags:
             self.draw_cue_flag(painter, x, color, flag_tip)
+        # Suggestions use a separate amber lane; saved cues remain blue above.
+        for cue in (() if self.comparison_active and self.cue_view == 'saved' else self.comparison_cues):
+            if start <= cue.time <= end:
+                x = (cue.time - start) / span * width
+                painter.setPen(QPen(QColor('#efb34f'), 1, Qt.DashLine))
+                painter.drawLine(round(x), top, round(x), bottom + 12)
+                self.draw_cue_flag(painter, x, QColor('#efb34f'), bottom + 18)
 
     @staticmethod
     def draw_cue_flag(painter, x, color, tip):

@@ -43,7 +43,7 @@ def test_manual_rebuild_rechecks_second_drop_and_does_not_accumulate_shift(tmp_p
     assert all(c.time in p.grid.times for c in p.cues)
     p.second_drop+=.1
     rebuild_proposal(p)
-    assert not p.ready_to_apply and p.grid_issue and p.cues_dirty
+    assert not p.ready_to_apply and p.review_note and not p.grid_issue and not p.cues_dirty
     p.first_drop+=.1
     rebuild_proposal(p)
     assert p.ready_to_apply and p.grid.times[128]==p.first_drop

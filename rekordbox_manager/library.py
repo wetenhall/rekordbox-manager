@@ -9,6 +9,7 @@ from contextlib import contextmanager
 from pathlib import Path
 
 from .models import Cue, Grid, Track
+from .playlist_structure import ordered_playlist_nodes
 from .guards import SafetyError, ensure_clean_database
 from .backups import digest
 from .cue_writer import compatibility_problem, write_staged
@@ -56,6 +57,7 @@ class RekordboxLibrary:
         self.loaded_ids = set()
         self.name = "Rekordbox library · read-only preview"
         self.playlists: dict[str, str] = {}
+        self.playlist_paths: dict[str, tuple[tuple[str, str], ...]] = {}
         with self.connect() as db:
             tables = {r[0] for r in db.execute("SELECT name FROM sqlite_master WHERE type='table'")}
             if not {"djmdContent", "djmdPlaylist", "djmdSongPlaylist", "djmdCue"} <= tables:
@@ -65,20 +67,17 @@ class RekordboxLibrary:
             if self.writable:
                 self.name = "Rekordbox library · memory cue import"
                 self.write_reason = "Grid and memory cue import enabled. Constant-tempo local MP3/WAV only; existing hot cues and saved loops are preserved."
-            rows = [dict(r) for r in db.execute("SELECT ID, Name, ParentID, Attribute FROM djmdPlaylist ORDER BY Seq")]
-            by_id = {str(r["ID"]): r for r in rows}
-            for r in rows:
-                # Smart playlists need their rule engine; do not silently show an empty static list.
-                if int(r["Attribute"] or 0) != 0:
-                    continue
-                name = r["Name"] or "Untitled playlist"
-                parent = str(r["ParentID"])
-                visited = {str(r["ID"])}
-                while parent in by_id and parent not in visited:
-                    visited.add(parent)
-                    name = (by_id[parent]["Name"] or "Folder") + " / " + name
-                    parent = str(by_id[parent]["ParentID"])
-                self.playlists[str(r["ID"])] = name
+            rows = [dict(r) for r in db.execute("SELECT ID, Name, ParentID, Attribute, Seq FROM djmdPlaylist ORDER BY Seq")]
+            self.playlist_nodes = ordered_playlist_nodes(rows)
+            paths = {}
+            for node in self.playlist_nodes:
+                parts = paths.get(node.parent_id, ()) + ((node.identity, node.name),)
+                paths[node.identity] = parts
+                # Smart playlists require their rule engine; display them in the
+                # browser, but never pretend they are empty regular playlists.
+                if node.attribute == 0:
+                    self.playlist_paths[node.identity] = parts
+                    self.playlists[node.identity] = " / ".join(name for _, name in parts)
 
     @contextmanager
     def connect(self):
@@ -235,7 +234,7 @@ class RekordboxLibrary:
     def restore(self, backups, folder):
         # Restoration only replaces files produced by this adapter. It does not
         # depend on the installed app version, so recovery survives an upgrade.
-        allowed = {self.path.name}
+        allowed = {self.path.name, "masterPlaylists6.xml"}
         with self.connect() as db:
             for row in db.execute('SELECT AnalysisDataPath FROM djmdContent'):
                 relative = str(row[0] or '').replace('\\', '/').lstrip('/')

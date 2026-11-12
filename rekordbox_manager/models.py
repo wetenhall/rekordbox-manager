@@ -92,6 +92,7 @@ class Proposal:
     waveform_data: WaveformData | None = None
     review_note: str = ""
     preserve_drop_positions: bool = False
+    manual_grid: Grid | None = None
 
     @property
     def ready_to_apply(self) -> bool:

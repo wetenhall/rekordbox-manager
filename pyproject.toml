@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "rekordbox-manager"
-version = "0.3.33"
+version = "0.3.73"
 description = "Local playlist analysis and memory-cue planning for Rekordbox"
 requires-python = ">=3.12"
 dependencies = [

@@ -55,8 +55,13 @@ def plan_cues(grid: Grid, first: float, second: float, duration: float,
         bars = round((anchor - index) / 4)
         t = (first if number == 1 else second) if preserve_anchors and bars == 0 else timestamp(index)
         key = round(t, 3)
-        tolerance = .0005 if preserve_anchors else .025
+        # Preserve explicit drop positions precisely. Countdown cues, however,
+        # must not consume another slot beside an existing anchor: independently
+        # detected drops can carry a few milliseconds of timing jitter.
+        tolerance = .0005 if preserve_anchors and not bars else .025
         if any(abs(c.time - t) < tolerance for c in memory):
+            return True
+        if bars and any(abs(c.time - t) <= .025 + 1e-9 for c in chosen.values()):
             return True
         if key in chosen:
             return True

@@ -100,3 +100,54 @@ def test_process_guard_does_not_block_itself(monkeypatch):
     from rekordbox_manager.guards import ensure_rekordbox_closed
     monkeypatch.setattr(psutil, 'process_iter', lambda attrs: [SimpleNamespace(info={'name':'Rekordbox Manager'})])
     ensure_rekordbox_closed()
+
+
+def test_playlist_hierarchy_preserves_nested_ids_duplicate_names_and_slashes(tmp_path):
+    path = make_library(tmp_path / 'master.db')
+    with sqlite3.connect(path) as db:
+        db.executescript("""
+            INSERT INTO djmdPlaylist VALUES('nested','2026 / favourites','folder',1,3);
+            INSERT INTO djmdPlaylist VALUES('p2','Warm up','nested',0,4);
+            INSERT INTO djmdPlaylist VALUES('other','Music','root',1,5);
+            INSERT INTO djmdPlaylist VALUES('p3','Warm up','other',0,6);
+        """)
+    before = digest(path)
+    lib = RekordboxLibrary(path)
+    assert lib.playlist_paths['p2'] == (('folder', 'Music'), ('nested', '2026 / favourites'), ('p2', 'Warm up'))
+    assert lib.playlist_paths['p3'] == (('other', 'Music'), ('p3', 'Warm up'))
+    assert set(lib.playlist_paths) == set(lib.playlists) == {'p', 'p2', 'p3'}
+    assert digest(path) == before
+
+
+def test_playlist_tree_keeps_parent_sequence_empty_folders_and_smart_playlists(tmp_path):
+    path = make_library(tmp_path / 'master.db')
+    with sqlite3.connect(path) as db:
+        db.execute('DELETE FROM djmdPlaylist')
+        db.executemany('INSERT INTO djmdPlaylist VALUES(?,?,?,?,?)', [
+            ('late', 'A folder', 'root', 1, 4),
+            ('child', 'First child', 'late', 0, 1),
+            ('early', 'Z folder', 'root', 1, 1),
+            ('lastchild', 'Last child', 'early', 0, 9),
+            ('nested', 'Nested / literal', 'early', 1, 2),
+            ('deep', 'Deep', 'nested', 0, 1),
+            ('empty', 'Empty', 'root', 1, 2),
+            ('smart', 'Smart', 'root', 4, 3),
+        ])
+    before = digest(path)
+    lib = RekordboxLibrary(path)
+    assert [n.identity for n in lib.playlist_nodes] == ['early', 'nested', 'deep', 'lastchild', 'empty', 'smart', 'late', 'child']
+    assert list(lib.playlists) == ['deep', 'lastchild', 'child']
+    assert lib.playlist_paths['deep'] == (('early', 'Z folder'), ('nested', 'Nested / literal'), ('deep', 'Deep'))
+    assert digest(path) == before
+
+
+def test_broken_playlist_parent_links_do_not_hide_items():
+    from rekordbox_manager.playlist_structure import ordered_playlist_nodes
+    rows = [dict(ID=identity, Name=identity, ParentID=parent, Attribute=kind, Seq=seq)
+            for identity, parent, kind, seq in [('a', 'b', 1, 1), ('b', 'a', 1, 2), ('p', 'b', 0, 1), ('orphan', 'missing', 0, 2)]]
+    nodes = ordered_playlist_nodes(rows)
+    assert {node.identity for node in nodes} == {'a', 'b', 'p', 'orphan'}
+    seen = set()
+    for node in nodes:
+        assert node.parent_id is None or node.parent_id in seen
+        seen.add(node.identity)

@@ -99,7 +99,8 @@ def test_replace_only_removes_ordinary_memory_cues(tmp_path):
     assert not rows(lib,'djmdCue',"WHERE ID='m'")
 
 
-def test_manually_confirmed_off_grid_cue_imports_exact_timings_with_grid(tmp_path):
+@pytest.mark.parametrize("manual", [False, True])
+def test_confirmed_off_grid_cue_imports_exact_timings_with_grid(tmp_path, manual):
     from rekordbox_manager.analysis import rebuild_proposal, confirm_proposal_review
     from rekordbox_manager.grid_writer import tempo
     lib, p, store = fixture_library(tmp_path)
@@ -114,7 +115,7 @@ def test_manually_confirmed_off_grid_cue_imports_exact_timings_with_grid(tmp_pat
     p.grid = p.track.grid
     p.options = Options(True, True)
     p.first_drop, p.second_drop = 16, 63.948
-    rebuild_proposal(p, manual=True)
+    rebuild_proposal(p, manual=manual)
     assert p.review_note and not p.can_apply and not p.cues_dirty
     before = digest(lib.path)
     with pytest.raises(SafetyError):

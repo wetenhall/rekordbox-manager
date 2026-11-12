@@ -70,6 +70,8 @@ class DemoLibrary:
     name = "Demo library · synthetic audio"
     playlists = {"all": "Demo / All genres", "house": "Demo / House", "dnb": "Demo / Drum and bass", "techno": "Demo / Techno"}
 
+    playlist_paths = {key: (("demo", "Demo"), (key, name.partition(" / ")[2])) for key, name in playlists.items()}
+
     def __init__(self, path: Path):
         self.path = path.resolve()
         self.root = self.path.parent

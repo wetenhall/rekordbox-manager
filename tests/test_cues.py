@@ -107,3 +107,25 @@ def test_manual_anchors_outside_grid_extent_stay_in_audio():
     assert any(c.time==0 and c.label=='DROP 1' for c in cues)
     assert any(c.time==511.9 and c.label=='DROP 2' for c in cues)
     assert all(0<=c.time<512 for c in cues)
+
+
+@pytest.mark.parametrize('offset', [.001, .006, .024, .025])
+def test_countdown_near_first_drop_does_not_create_duplicate(offset):
+    cues, _ = plan_cues(grid(), 64, 224 + offset, 512, [], True, preserve_anchors=True)
+    assert len(cues) == 8
+    assert [(c.time, c.label) for c in cues if abs(c.time - 64) < .03] == [(64, 'DROP 1')]
+    assert next(c.time for c in cues if c.label == 'DROP 2') == 224 + offset
+    assert all(c.time > 64.025 for c in cues if c.label.startswith('DROP 2'))
+
+
+def test_countdown_beyond_duplicate_window_remains_distinct():
+    cues, _ = plan_cues(grid(), 64, 224.026, 512, [], True, preserve_anchors=True)
+    assert len(cues) == 9
+    assert next(c.time for c in cues if c.label == 'DROP 2 −80') == pytest.approx(64.026)
+
+
+def test_keep_saved_drop_does_not_add_nearby_countdown():
+    saved = Cue(64, 'My drop')
+    cues, _ = plan_cues(grid(), 64, 224.006, 512, [saved], False, preserve_anchors=True)
+    assert saved in cues and len(cues) == 8
+    assert sum(abs(c.time - 64) < .025 for c in cues) == 1

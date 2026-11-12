@@ -185,3 +185,49 @@ def test_structural_drops_and_grid_alignment(tmp_path,bpm,syncopated,fix_grid,we
     else:
         assert p.grid is g
         assert p.review_note and not p.cues_dirty and any('grid was not moved' in note for note in p.drop_notes)
+
+
+@pytest.mark.parametrize('off_grid,unmatched_audio', [(True, False), (False, True), (True, True)])
+def test_complete_uncertain_proposal_can_be_confirmed_without_regeneration(tmp_path, monkeypatch, off_grid, unmatched_audio):
+    from copy import deepcopy
+    from rekordbox_manager.analysis import confirm_proposal_review, review_confirmation_error
+    from rekordbox_manager.attacks import AttackMatch
+    from test_rekordbox_waveforms import saved_files
+    track = make_track(tmp_path)
+    if unmatched_audio:
+        track.analysis_paths = saved_files(tmp_path, 64)
+        monkeypatch.setattr('rekordbox_manager.audio_timing.saved_audio_offset', lambda *args: None)
+    second = 48.343 if off_grid else 48.25
+    monkeypatch.setattr('rekordbox_manager.analysis.drop_suggestions', lambda *args: (16.25, second))
+    monkeypatch.setattr('rekordbox_manager.analysis.refine_drop',
+                        lambda y, sr, attacks, target, *args, **kwargs: AttackMatch(target, 'Clear attack', False))
+    monkeypatch.setattr('rekordbox_manager.analysis.rhythm_issue', lambda *args: '')
+    p = analyse(track, Options(True, True))
+    assert not p.error and not p.grid_issue and not p.cues_dirty
+    assert p.review_note and not p.ready_to_apply and not p.can_apply
+    assert not review_confirmation_error(p)
+    assert next(c.time for c in p.cues if c.label == 'DROP 2') == second
+    if off_grid:
+        assert '+93 ms' in p.review_note and p.preserve_drop_positions
+    if unmatched_audio:
+        assert 'could not be matched' in p.review_note
+    before = deepcopy((p.grid, p.cues, p.first_drop, p.second_drop, track.grid))
+    def forbidden(*args, **kwargs):
+        pytest.fail('Confirmation must not analyse or rebuild')
+    monkeypatch.setattr('rekordbox_manager.analysis.rebuild_proposal', forbidden)
+    monkeypatch.setattr('rekordbox_manager.analysis.load_audio', forbidden)
+    confirm_proposal_review(p)
+    assert p.ready_to_apply and p.can_apply
+    assert (p.grid, p.cues, p.first_drop, p.second_drop, track.grid) == before
+
+
+def test_audio_uncertainty_does_not_allow_missing_cues_to_be_confirmed(tmp_path, monkeypatch):
+    from test_rekordbox_waveforms import saved_files
+    from rekordbox_manager.analysis import review_confirmation_error
+    track = make_track(tmp_path)
+    track.analysis_paths = saved_files(tmp_path, 64)
+    monkeypatch.setattr('rekordbox_manager.audio_timing.saved_audio_offset', lambda *args: None)
+    monkeypatch.setattr('rekordbox_manager.analysis.drop_suggestions', lambda *args: (None, None))
+    p = analyse(track, Options(True, True))
+    assert p.review_note and p.cues_dirty
+    assert review_confirmation_error(p) and not p.can_apply

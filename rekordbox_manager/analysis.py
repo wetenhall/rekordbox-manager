@@ -21,7 +21,7 @@ def rebuild_proposal(proposal: Proposal, *, manual: bool = False) -> None:
     """Use edited anchors, retaining the original tempo on every rebuild."""
     p = proposal
     p.review_note = ""
-    p.preserve_drop_positions = False
+    p.preserve_drop_positions = p.manual_grid is not None
     p.cues_dirty = True
     p.reviewed = p.grid_approved = False
     first, second = p.first_drop, p.second_drop
@@ -31,14 +31,15 @@ def rebuild_proposal(proposal: Proposal, *, manual: bool = False) -> None:
     grid = p.grid
     issue = ""
     review_note = ""
-    if p.options.fix_grid:
+    if p.options.fix_grid and p.manual_grid is None:
         try:
             grid, first, second, issue = align_drops(p.track.grid, first, second, p.track.duration,
                                                        reference=p.grid_anchor, first_edited=manual or p.first_drop_edited,
                                                        second_edited=manual or p.second_drop_edited)
-            if manual and issue:
-                # A valid translated grid can coexist with an intentionally
-                # off-grid cue. Only an explicit manual rebuild offers this.
+            if issue:
+                # Finish a reviewable proposal even when the other drop is
+                # off-grid. Human confirmation, not another identical rebuild,
+                # accepts these timings. Invalid translations still fail below.
                 other = second if p.grid_anchor == 1 else first
                 offset = other - grid.times[grid.nearest_downbeat(other)]
                 review_note = (f"Drop {3 - p.grid_anchor} is {offset * 1000:+.0f} ms from a bar start. "
@@ -64,10 +65,11 @@ def rebuild_proposal(proposal: Proposal, *, manual: bool = False) -> None:
     p.reviewed = p.grid_approved = False
     p.drop_notes = []
     p.warnings = p.track.issues + warnings + ["Listen to both drop anchors before importing."]
+    p.review_note = review_note
     if manual:
         rebuilt = "Cues and grid rebuilt." if p.options.fix_grid else "Cues rebuilt; existing grid kept."
         p.review_note = review_note or rebuilt + " Check the result, then confirm review to make this track ready for import."
-    if p.options.fix_grid:
+    if p.options.fix_grid and p.manual_grid is None:
         anchor = first if p.grid_anchor == 1 else second
         original_index = min(range(len(p.track.grid.times)), key=lambda i: abs(p.track.grid.times[i] - anchor))
         offset = anchor - p.track.grid.times[original_index]
@@ -75,7 +77,7 @@ def rebuild_proposal(proposal: Proposal, *, manual: bool = False) -> None:
         adjustment = (first, second)[other - 1] - before[other - 1]
         p.grid_note = (f"Grid shifted {offset * 1000:+.0f} ms to Drop {p.grid_anchor}; BPM unchanged. "
                        + ("Cue markers retain your chosen positions. " if p.preserve_drop_positions else "Cues use exact grid bar starts. ")
-                       + "Check the metronome throughout the track.")
+                       + "Check the grid against the waveform throughout the track.")
         if abs(adjustment) >= .0005:
             p.grid_note += f" Automatic Drop {other} adjusted {adjustment * 1000:+.0f} ms to the same grid."
         if len(grid.times) < len(p.track.grid.times):
@@ -252,7 +254,7 @@ def analyse(track: Track, options: Options) -> Proposal:
             from .waveform_data import _floats
             offset = saved_audio_offset(y, sr, display.peaks, display.sample_rate)
             if offset is None:
-                timing_issue = 'Saved waveform and decoded audio timing could not be matched reliably. Check drop positions on the saved waveform, then align and rebuild manually before import.'
+                timing_issue = 'Saved waveform and decoded audio timing could not be matched reliably. Listen and check the grid and both drops on the saved waveform. Confirm review if correct; edit and rebuild only if needed.'
             else:
                 track.audio_offset = offset
                 y = shift_samples(y, sr, offset)
@@ -273,7 +275,7 @@ def analyse(track: Track, options: Options) -> Proposal:
             # For cue analysis the drops determine a translation only. Do not
             # first change BPM with the independent spectral-flux suggestion.
             proposal.grid, proposal.grid_note = rounded_grid(track.grid if options.set_cues else candidate), assessment
-            proposal.warnings.append("Check the metronome and bar starts before import. Use Set drop 1 / bar 1 here if the bar alignment is wrong.")
+            proposal.warnings.append("Check the beat grid and bar starts before import. Use Set drop 1 / bar 1 here if the bar alignment is wrong.")
         else:
             proposal.grid_note = "Existing grid retained. " + assessment
             if candidate is not track.grid:
@@ -306,12 +308,12 @@ def analyse(track: Track, options: Options) -> Proposal:
                                                 lower=proposal.first_drop if number == 2 else -1.,
                                                 upper=proposal.second_drop if number == 1 else duration)
                             if match.time is None or match.needs_review or abs(match.time - target) > .025:
-                                proposal.review_note = "Listen and check the suggested drop markers."
+                                proposal.review_note = proposal.review_note or "Listen and check the suggested drop markers."
                                 proposal.drop_notes.append(f"Drop {number}: {match.note}")
                         rhythm_warning = rhythm_issue(proposal.grid, proposal.attacks,
                                                        proposal.first_drop, proposal.second_drop)
                         if rhythm_warning:
-                            proposal.review_note = "Automatic timing check inconclusive. Listen to the track and check the grid and both drops, then confirm review."
+                            proposal.review_note = proposal.review_note or "Automatic timing check inconclusive. Listen to the track and check the grid and both drops, then confirm review."
                 else:
                     proposal.cues, warnings = plan_cues(proposal.grid, proposal.first_drop, proposal.second_drop,
                                                         duration, track.cues, options.replace_memory, preserve_anchors=True)
@@ -322,8 +324,9 @@ def analyse(track: Track, options: Options) -> Proposal:
             proposal.warnings += proposal.drop_notes
             proposal.warnings.append("Drop suggestions combine bass changes and drum attacks. These are heuristic matches; listen and confirm both anchors.")
         if timing_issue:
-            proposal.grid_issue = timing_issue
-            proposal.cues_dirty = True
+            # This is uncertainty about detection, not evidence that the
+            # generated cues are stale. Keep real errors/dirty state intact.
+            proposal.review_note = "\n".join(filter(None, (proposal.review_note, timing_issue)))
     except Exception as exc:
         proposal.error = str(exc)
     return proposal
@@ -346,7 +349,7 @@ def review_confirmation_error(p: Proposal) -> str:
             if first is None or second is None or not 0 <= first < second < p.track.duration:
                 return "Set both drop markers inside the track, then rebuild cues."
             anchors = ((first if p.grid_anchor == 1 else second),) if p.preserve_drop_positions else (first, second)
-            if p.options.fix_grid and any(abs(p.grid.times[p.grid.nearest_downbeat(t)] - t) > .0005 for t in anchors):
+            if p.options.fix_grid and p.manual_grid is None and any(abs(p.grid.times[p.grid.nearest_downbeat(t)] - t) > .0005 for t in anchors):
                 return "Both drops must align with bar starts. Check the markers and rebuild."
             expected, _ = plan_cues(p.grid, first, second, p.track.duration, p.track.cues,
                                     p.options.replace_memory, preserve_anchors=not p.options.fix_grid or p.preserve_drop_positions)

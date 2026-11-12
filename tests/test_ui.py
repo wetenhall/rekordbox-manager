@@ -17,6 +17,8 @@ def window(tmp_path, monkeypatch):
     app = QApplication.instance() or QApplication([])
     w = MainWindow()
     yield w
+    w.import_queue.reset()
+    w.organiser_queue.reset()
     w.close()
     app.processEvents()
 
@@ -50,7 +52,7 @@ def test_confirmation_gate_loads_library_before_workspace(window, tmp_path, monk
     assert calls==[path]
     assert window.pages.currentWidget() is window.workspace
     assert window.library is library and window.tracks==[track]
-    assert window.playlists.currentText()=='My playlist'
+    assert window.playlist_browser.tree.currentItem().text(0)=='My playlist'
     assert window.analyse_button.isEnabled()
 
 
@@ -115,7 +117,6 @@ def test_live_write_button_remains_locked(window, tmp_path):
     window.populate_table()
     window.table.selectRow(0)
     window.update_details()
-    assert not window.apply_button.isEnabled()
 
 
 def review_playlist(window, tmp_path, monkeypatch):
@@ -137,18 +138,21 @@ def test_preparation_action_names_selected_operations(window,tmp_path,monkeypatc
     window.fix_grid.setChecked(True)
     window.set_cues.setChecked(True)
     window.invalidate()
-    assert window.analyse_button.text()=='Set cues + grid'
+    assert window.analyse_button.text()=='Scan && prepare playlist'
+    assert 'set memory cues and fix beat grids' in window.analyse_button.toolTip()
     assert 'Reuse saved Rekordbox' in window.analyse_button.toolTip()
     window.fix_grid.setChecked(False)
-    assert window.analyse_button.text()=='Set cues'
+    assert window.analyse_button.text()=='Scan && prepare playlist'
+    assert 'to set memory cues,' in window.analyse_button.toolTip()
     window.fix_grid.setChecked(True)
     window.set_cues.setChecked(False)
-    assert window.analyse_button.text()=='Set grid'
+    assert window.analyse_button.text()=='Scan && prepare playlist'
+    assert 'to fix beat grids,' in window.analyse_button.toolTip()
     window.fix_grid.setChecked(False)
     assert not window.analyse_button.isEnabled()
 
 
-def test_playback_seeking_uses_saved_timeline_and_metronome_does_not_double_offset(window,tmp_path,monkeypatch):
+def test_playback_seeking_uses_saved_timeline_and_alternate_source_does_not_double_offset(window,tmp_path,monkeypatch):
     from PySide6.QtCore import QUrl
     p=review_playlist(window,tmp_path,monkeypatch)[0]
     p.track.audio_offset=.053
@@ -159,7 +163,7 @@ def test_playback_seeking_uses_saved_timeline_and_metronome_does_not_double_offs
     assert positions[-1]==9947
     window.play_position(9947)
     assert window.wave.position==10
-    monkeypatch.setattr(window.player,'source',lambda:QUrl.fromLocalFile(str(tmp_path/'metronome.wav')))
+    monkeypatch.setattr(window.player,'source',lambda:QUrl.fromLocalFile(str(tmp_path/'alternate.wav')))
     window.seek(10)
     assert positions[-1]==10000
     window.play_position(10000)
@@ -168,10 +172,7 @@ def test_playback_seeking_uses_saved_timeline_and_metronome_does_not_double_offs
 
 def prepare_apply(window, tmp_path, monkeypatch):
     proposals = review_playlist(window, tmp_path, monkeypatch)
-    window.playlists.blockSignals(True)
-    window.playlists.clear()
-    window.playlists.addItem('Test playlist', 'test')
-    window.playlists.blockSignals(False)
+    window.playlist_ids = ('test',)
     window.loaded_playlist_tracks = {'test': ('Test playlist', frozenset(t.id for t in window.tracks))}
     window.capture_analysis_scope()
     calls, messages = [], []
@@ -189,7 +190,6 @@ def prepare_apply(window, tmp_path, monkeypatch):
 
 def test_playlist_apply_needs_no_per_track_confirmation(window, tmp_path, monkeypatch):
     proposals, calls, messages = prepare_apply(window, tmp_path, monkeypatch)
-    assert window.apply_button.isEnabled()
     assert not hasattr(window, 'grid_confirm') and not hasattr(window, 'approve_all')
     window.first.setValue(96)
     window.rebuild_cues()
@@ -228,7 +228,6 @@ def test_grid_only_playlist_needs_no_drop_anchors(window, tmp_path, monkeypatch)
     window.apply_changes()
     assert all(p.can_apply and p.first_drop is None and not p.cues for p in calls[0])
     window.invalidate()
-    assert not window.apply_button.isEnabled()
 
 
 def test_cues_only_playlist_does_not_approve_grids(window, tmp_path, monkeypatch):
@@ -243,22 +242,18 @@ def test_live_library_apply_never_prompts_or_writes(window, tmp_path, monkeypatc
     proposals = review_playlist(window, tmp_path, monkeypatch)
     monkeypatch.setattr(QMessageBox, 'question', lambda *args: pytest.fail('Live apply must remain blocked'))
     window.apply_changes()
-    assert not window.apply_button.isEnabled()
-    assert window.apply_button.text() == 'Apply all changes (3 tracks)'
 
 
 def test_all_invalid_or_busy_playlist_cannot_apply(window, tmp_path, monkeypatch):
     proposals, calls, messages = prepare_apply(window, tmp_path, monkeypatch)
     window.set_busy(True)
     window.update_details()
-    assert not window.apply_button.isEnabled()
     window.apply_changes()
     assert not calls and not messages
     window.set_busy(False)
     for p in proposals:
         p.error = 'Failed'
     window.update_details()
-    assert not window.apply_button.isEnabled()
     window.apply_changes()
     assert not calls and not messages
 
@@ -299,9 +294,23 @@ def test_deck_above_playlist_and_footer_stays_visible(window, tmp_path, monkeypa
     QApplication.processEvents()
     assert window.size().width() == size[0]
     assert window.size().height() == size[1]
+    assert window.navigation.mapTo(window, QPoint(0, window.navigation.height())).y() < window.review_controls.mapTo(window, QPoint(0, 0)).y()
+    assert window.navigation.mapTo(window, QPoint(window.navigation.width(), 0)).x() == window.width() - 10
+    assert window.table.mapTo(window, QPoint(0, window.table.height())).y() < window.status.mapTo(window, QPoint(0, 0)).y()
+    assert window.wave.mapTo(window, QPoint(0, window.wave.height())).y() < window.review_controls.mapTo(window, QPoint(0, 0)).y()
+    assert window.library_splitter.widget(1).layout().itemAt(2).widget().objectName() == 'columnHeader'
+    assert window.library_splitter.widget(1).layout().itemAt(3).widget() is window.table
     assert window.wave.mapTo(window, QPoint(0, window.wave.height())).y() < window.table.mapTo(window, QPoint(0, 0)).y()
     assert window.table.height() >= 4 * 28
-    assert window.apply_button.mapTo(window, QPoint(window.apply_button.width(), window.apply_button.height())).y() <= window.height()
+    assert window.analyse_button.mapTo(window, QPoint(0, 0)).y() > window.table.mapTo(window, QPoint(0, window.table.height())).y()
+    assert window.analyse_button.mapTo(window, QPoint(0, window.analyse_button.height())).y() <= window.height()
+    assert not hasattr(window, "apply_button") and not hasattr(window, "details")
+    assert not hasattr(window, "playlists")
+    for control in (window.fix_grid, window.set_cues, window.replace_cues, window.ignore_cued):
+        assert isinstance(control, QPushButton) and control.isCheckable()
+        assert control.mapTo(window, control.rect().center()).y() == window.analyse_button.mapTo(window, window.analyse_button.rect().center()).y()
+        assert control.geometry().right() < window.analyse_button.geometry().left()
+        assert control.text().endswith('On' if control.isChecked() else 'Off')
     assert not window.findChildren(QFrame, 'rail')
     for row in window.table._buttons:
         cells = [row.layout().itemAt(i).widget() for i in range(row.layout().count())]
@@ -312,7 +321,7 @@ def test_deck_above_playlist_and_footer_stays_visible(window, tmp_path, monkeypa
     QApplication.processEvents()
     assert window.table.height() >= 4 * 28
     window.show_backups()
-    assert window.tabs.currentIndex() == 1
+    assert window.tabs.currentWidget() is window.backups_tab
     next(b for b in window.findChildren(QPushButton) if b.text() == '← Back to playlist').click()
     assert window.tabs.currentIndex() == 0
 
@@ -323,7 +332,6 @@ def test_live_import_confirmation_includes_grid_files(window, tmp_path, monkeypa
     for p in proposals:
         p.options = Options(False, True)
     window.update_details()
-    assert window.apply_button.text() == 'Import cues to Rekordbox (3 tracks)'
     window.apply_changes()
     assert len(calls) == 1 and 'Includes the database' in messages[0]
     calls.clear(); messages.clear()
@@ -415,7 +423,7 @@ def test_space_preserves_editor_and_dialog_keys(window, tmp_path, monkeypatch):
     dialog.close()
 
 
-def test_grid_anchor_invalidates_old_cues_and_metronome(window, tmp_path, monkeypatch):
+def test_grid_anchor_invalidates_old_cues(window, tmp_path, monkeypatch):
     proposals = review_playlist(window, tmp_path, monkeypatch)
     proposal = proposals[0]
     monkeypatch.setattr(window.player, 'position', lambda: 128520)
@@ -427,29 +435,6 @@ def test_grid_anchor_invalidates_old_cues_and_metronome(window, tmp_path, monkey
     window.rebuild_cues()
     assert not proposal.cues_dirty
     assert any(c.time == 128.52 and c.label == 'DROP 1' for c in proposal.cues)
-
-
-def test_metronome_rebuilds_accents_after_bar_alignment(window, tmp_path, monkeypatch):
-    from types import SimpleNamespace
-    proposals=review_playlist(window,tmp_path,monkeypatch)
-    proposals[0].track.path.write_bytes(b'only-stat-needed')
-    paths,callbacks,sources=[],[],[]
-    def worker(track,grid,path):
-        paths.append(path)
-        return SimpleNamespace(done=SimpleNamespace(connect=callbacks.append),
-                               start=lambda:None,isRunning=lambda:False)
-    monkeypatch.setattr('rekordbox_manager.ui.MetronomeWorker',worker)
-    monkeypatch.setattr(window.player,'setSource',lambda url:sources.append(url))
-    monkeypatch.setattr(window.player,'position',lambda:129000)
-    window.metronome.setChecked(True)
-    window.align_grid_to_playhead()  # Beat times stay fixed; only bar accents change.
-    window.metronome.setChecked(True)
-    assert len(paths)==2 and paths[0]!=paths[1]
-    sources.clear()
-    callbacks[0](str(paths[0]),'')
-    assert sources==[]  # An old asynchronous render cannot replace the new grid.
-    callbacks[1](str(paths[1]),'')
-    assert len(sources)==1
 
 
 def test_rebuild_preserves_manual_anchor_and_snap_change_does_not_move_it(window,tmp_path,monkeypatch):
@@ -517,7 +502,8 @@ def test_arrows_change_preview_from_deck_and_wrap_preserving_edits(window,tmp_pa
     assert not window.rebuild_button.property('needsRebuild')
     QTest.keyClick(window.play,Qt.Key_Up)
     assert window.wave.proposal is proposals[0] and window.second.value()==386
-    assert window.rebuild_button.property('needsRebuild') and 'needed' in window.rebuild_button.text()
+    assert window.rebuild_button.property('needsRebuild')
+    assert 'Rebuild needed' in window.review_title.toolTip()
     QTest.keyClick(window.play,Qt.Key_Up)
     assert window.table.currentRow()==2
     QTest.keyClick(window.play,Qt.Key_Down)
@@ -585,7 +571,7 @@ def test_unchanged_kick_selects_drop_two_and_explicit_alignment_preserves_confli
     p.first_drop,p.second_drop=43.798,153.601
     p.attacks=[Attack(153.601,1)]
     rebuild_proposal(p)
-    assert p.grid_anchor==1 and p.grid_issue
+    assert p.grid_anchor==1 and p.review_note and not p.grid_issue
     window.select_track()
     previous=p.grid
     window.snap_drop_to_kick(2)
@@ -598,7 +584,7 @@ def test_unchanged_kick_selects_drop_two_and_explicit_alignment_preserves_confli
     assert tempo(p.grid)==tempo(original) and p.track.grid==original
     assert not p.grid_issue and 'bar start' in p.review_note and not p.ready_to_apply
     assert window.confirm_review_button.isEnabled()
-    assert not window.details.text().startswith('Rebuild needed')
+    assert 'Rebuild needed' not in window.review_title.toolTip()
     window.grid_anchor_buttons[0].click()
     assert p.grid.times[p.grid.nearest_downbeat(43.798)]==43.798
     assert (p.first_drop,p.second_drop)==(43.798,153.601)
@@ -665,7 +651,7 @@ def test_successful_connection_remembered_after_restart_without_confirmation(win
         assert reopened.startup_database==path
         assert reopened.startup_database_label.text()==str(path)
         assert reopened.startup_database_state == 'saved'
-        assert reopened.startup_database_heading.text() == '✓ Saved library found'
+        assert reopened.startup_database_heading.text() == 'Saved library'
         assert reopened.startup_database_card.property('state') == 'saved'
         assert reopened.startup_browse.text() == 'Change database…'
         assert 'Reconnect saved library' in reopened.continue_button.text()
@@ -784,7 +770,7 @@ def test_manual_52ms_conflict_rebuilds_then_confirms_and_leaves_review_queue(win
     p = proposals[0]
     p.first_drop, p.second_drop = 128, 383.948
     rebuild_proposal(p)
-    assert p.grid_issue and p.cues_dirty
+    assert p.review_note and not p.grid_issue and not p.cues_dirty
     window.populate_table()
     window.review_filter.setCurrentIndex(1)
     window.select_track()
@@ -807,9 +793,12 @@ def test_settings_contains_library_and_diagnostics_without_changing_track_edits(
     p=review_playlist(window,tmp_path,monkeypatch)[0]
     window.pages.setCurrentWidget(window.workspace)
     window.first.setValue(128.010)
-    window.settings_button.click()
-    assert window.tabs.currentIndex()==2
-    settings=window.tabs.widget(2)
+    from PySide6.QtCore import Qt
+    from PySide6.QtTest import QTest
+    QTest.mouseClick(window.navigation, Qt.LeftButton,
+                     pos=window.navigation.tabRect(window.tabs.indexOf(window.settings_tab)).center())
+    assert window.tabs.currentWidget() is window.settings_tab
+    settings=window.settings_tab
     assert settings.isAncestorOf(window.connect_button)
     assert settings.isAncestorOf(window.diagnostics_button)
     assert not window.play_shortcut.isEnabled()
@@ -976,7 +965,7 @@ def test_ignore_cued_excludes_all_saved_cue_types_from_scan_scope_and_import(win
     tracks, calls, analysed = ignore_cued_library(window, tmp_path, monkeypatch)
     window.ignore_cued.setChecked(True)
     assert [t.id for t in window.tracks] == ['4', '5']
-    assert window.ignored_track_count == 4 and '4 ignored' in window.track_count.text()
+    assert window.ignored_track_count == 4 and '4 tracks with existing cues ignored' in window.status.text()
     window.start_analysis()
     assert not window.ignore_cued.isEnabled()
     finish_review_worker(window)
@@ -1005,9 +994,9 @@ def test_ignore_cued_rechecks_saved_cues_at_scan_start_and_handles_all_ignored(w
     window.start_analysis()
     assert not analysed and not calls and window.worker is None
     assert not window.tracks and window.ignored_track_count == 6
-    assert not window.analyse_button.isEnabled() and not window.apply_button.isEnabled()
+    assert not window.analyse_button.isEnabled()
     assert window.wave.proposal is None and window.analysis_scope is None
-    assert 'No tracks to prepare' in window.status.text()
+    assert 'No tracks to prepare' in window.status.full_text
 
 
 def test_ignore_cued_off_keeps_existing_cues_in_scan(window, tmp_path, monkeypatch):
@@ -1021,10 +1010,7 @@ def test_ignore_cued_off_keeps_existing_cues_in_scan(window, tmp_path, monkeypat
 
 def test_playlist_breakdown_counts_shared_skipped_empty_and_imported_tracks(window, tmp_path, monkeypatch):
     proposals, calls, _ = prepare_apply(window, tmp_path, monkeypatch)
-    window.playlists.blockSignals(True)
-    window.playlists.clear()
-    window.playlists.addItem('3 playlists', ('a', 'b', 'empty'))
-    window.playlists.blockSignals(False)
+    window.playlist_ids = ('a', 'b', 'empty')
     window.loaded_playlist_tracks = {
         'a': ('House / Warm-up', frozenset(('0', '1'))),
         'b': ('House / Peak time', frozenset(('1', '2'))),
@@ -1057,7 +1043,7 @@ def test_import_rejects_results_outside_original_scan(window, tmp_path, monkeypa
     elif change == 'duplicate':
         window.proposals.append(proposals[0])
     elif change == 'selection':
-        window.playlists.setItemData(0, 'different')
+        window.playlist_ids = ('different',)
     elif change == 'library':
         window.library = SimpleNamespace(**vars(window.library))
     else:
@@ -1071,7 +1057,7 @@ def test_import_rejects_results_outside_original_scan(window, tmp_path, monkeypa
 def test_import_rechecks_scan_after_confirmation(window, tmp_path, monkeypatch):
     proposals, calls, _ = prepare_apply(window, tmp_path, monkeypatch)
     def confirm(dialog):
-        window.playlists.setItemData(0, 'different')
+        window.playlist_ids = ('different',)
         return QDialog.Accepted
     monkeypatch.setattr(ImportDialog, 'exec', confirm)
     errors = []
@@ -1118,15 +1104,15 @@ def test_saved_waveform_visible_before_preparation(window, tmp_path, monkeypatch
     assert preview.peaks[150] == 1 and preview.grid == track.grid and preview.cues == track.cues
     assert not preview.ready_to_apply and not window.proposals and window.analysis_scope is None
     assert window.selected() is None and window.player.source().isEmpty()
-    for control in (window.apply_button, window.first, window.second, window.rebuild_button,
-                    window.align_grid, window.play, window.metronome, *window.kick_buttons):
+    for control in (window.first, window.second, window.rebuild_button,
+                    window.align_grid, window.play, *window.kick_buttons):
         assert not control.isEnabled()
     window.seek(1)
     assert window.wave.position == 1 and window.player.source().isEmpty()
     window.navigate_track(1)
     assert window.wave.proposal.track.id == other.id
     assert not window.wave.proposal.peaks
-    assert 'unavailable' in window.details.full_text
+    assert 'unavailable' in window.review_title.toolTip()
     window.navigate_track(-1)
     window.fix_grid.setChecked(True)
     assert window.wave.proposal.peaks[150] == 1 and not window.proposals
@@ -1272,6 +1258,10 @@ def test_confirm_review_moves_forward_from_middle_and_zooms_next_drop(window, tm
     assert window.wave.zoom == 16 and window.wave.view_center == proposals[2].first_drop
     window.confirm_review_button.click()
     assert window.selected() is proposals[0]
+    window.confirm_review_button.click()
+    assert all(p.reviewed for p in proposals)
+    assert 'No tracks left to review' in window.status.text()
+    assert window.table.currentRow() == (-1 if filtered else 0)
 
 
 def test_review_without_first_drop_and_ready_tracks_keep_whole_track_view(window, tmp_path, monkeypatch):
@@ -1305,7 +1295,7 @@ def test_auto_cue_retries_only_review_tracks_without_changing_grids_or_importing
     window.populate_table()
     window.review_filter.setCurrentIndex(1)
     window.auto_cue_button.click()
-    assert not window.auto_cue_button.isEnabled() and not window.apply_button.isEnabled()
+    assert not window.auto_cue_button.isEnabled()
     before = proposals[1].first_drop
     window.move_drop_marker(1, before + .2)
     assert proposals[1].first_drop == before
@@ -1353,3 +1343,202 @@ def test_auto_cue_requires_original_scan_scope(window, tmp_path, monkeypatch):
     monkeypatch.setattr(window, 'fail', errors.append)
     window.auto_cue_review_tracks()
     assert errors and not calls and window.worker is None
+
+
+def test_nested_playlist_picker_search_reveals_paths_and_keeps_selection(window):
+    from PySide6.QtCore import Qt
+    paths = {
+        'a': (('music', 'Music'), ('dnb', 'Drum & Bass'), ('year', '2026'), ('a', 'Warm up')),
+        'b': (('music', 'Music'), ('house', 'House'), ('b', 'Warm up')),
+        'c': (('archive', 'Archive'), ('c', 'Old favourites')),
+    }
+    names = {key: ' / '.join(name for _, name in parts) for key, parts in paths.items()}
+    dialog = PlaylistDialog(window, names, ('c',), paths)
+    assert dialog.tree.topLevelItemCount() == 2
+    assert dialog.items['a'].text(0) == 'Warm up'
+    assert dialog.items['a'].toolTip(0) == names['a']
+    dialog.search.setText('2026 warm')
+    assert not dialog.items['a'].isHidden()
+    assert dialog.items['b'].isHidden() and dialog.items['c'].isHidden()
+    assert all(dialog.folders[key].isExpanded() for key in [('music',), ('music', 'dnb'), ('music', 'dnb', 'year')])
+    assert '1 hidden by filters' in dialog.count.text()
+    dialog.check_visible(Qt.Checked)
+    assert dialog.selected_ids() == ('a', 'c')
+    dialog.search.clear()
+    # Searching did not replace the previous browsing state.
+    assert not dialog.folders[('music',)].isExpanded()
+    assert dialog.folders[('archive',)].isExpanded()
+    dialog.selected_only.setChecked(True)
+    assert not dialog.items['a'].isHidden() and dialog.items['b'].isHidden()
+    dialog.check_visible(Qt.Unchecked)
+    assert dialog.selected_ids() == ()
+    assert not dialog.use_button.isEnabled()
+    assert not dialog.empty.isHidden()
+    dialog.selected_only.setChecked(False)
+    dialog.search.setText('no such playlist')
+    assert all(item.isHidden() for item in dialog.items.values())
+    dialog.search.clear()
+    assert all(not item.isHidden() for item in dialog.items.values())
+    dialog.close()
+
+
+def test_playlist_picker_uses_ids_for_duplicate_folders_and_literal_slashes(window):
+    from PySide6.QtCore import Qt
+    paths = {
+        'a': (('f1', 'Music'), ('a', 'Warm / up')),
+        'b': (('f2', 'Music'), ('b', 'Warm / up')),
+    }
+    dialog = PlaylistDialog(window, {'a': 'Music / Warm / up', 'b': 'Music / Warm / up'}, (), paths)
+    assert dialog.tree.topLevelItemCount() == 2
+    assert dialog.items['a'].parent() is not dialog.items['b'].parent()
+    assert dialog.items['a'].text(0) == 'Warm / up'
+    dialog.items['a'].setCheckState(0, Qt.Checked)
+    assert dialog.selected_ids() == ('a',)
+    dialog.search.setText('missing')
+    dialog.clear_all.click()
+    assert dialog.selected_ids() == ()
+    dialog.close()
+
+
+def test_off_grid_generated_cues_confirm_directly_and_advance_without_rebuild(window, tmp_path, monkeypatch):
+    from copy import deepcopy
+    from rekordbox_manager.analysis import rebuild_proposal
+    proposals, calls, _ = prepare_apply(window, tmp_path, monkeypatch)
+    p = proposals[0]
+    p.first_drop, p.second_drop = 128, 383.948
+    rebuild_proposal(p)  # Initial automatic preparation, not a manual rebuild.
+    proposals[1].review_note = 'Listen to the suggested drop'
+    before = deepcopy((p.grid, p.cues, p.first_drop, p.second_drop))
+    window.populate_table()
+    window.review_filter.setCurrentIndex(1)
+    assert window.confirm_review_button.isEnabled()
+    assert 'needed' not in window.rebuild_button.text()
+    def forbidden(*args, **kwargs):
+        pytest.fail('Confirm must not regenerate cues or run analysis')
+    monkeypatch.setattr('rekordbox_manager.ui.rebuild_proposal', forbidden)
+    monkeypatch.setattr('rekordbox_manager.ui.analyse', forbidden)
+    window.confirm_review_button.click()
+    assert p.can_apply and (p.grid, p.cues, p.first_drop, p.second_drop) == before
+    assert window.selected() is proposals[1] and window.table.visible_rows() == [1]
+    assert not window.table._buttons[0].property('needsReview') and not calls
+    assert window.import_playlist_breakdown() == [('Test playlist', 3, 2, 1, 0)]
+
+
+def usage_results(count=3):
+    from rekordbox_manager.usage import UsageScan, TrackUsage
+    tracks = [TrackUsage('zero','Quiet Track','Alice','House','/missing/zero.wav',0,0,0),
+              TrackUsage('history','Reset Count','Bob','Techno','/missing/reset.wav',0,2,1),
+              TrackUsage('unknown','Unknown Count','Alice','House','/missing/unknown.wav',None,0,0)]
+    tracks.extend(TrackUsage(str(i),f'Extra {i:04}','Artist','House','',i,0,0) for i in range(3,count))
+    return UsageScan(tuple(tracks), (), '10 Nov 2026, 12:00 GMT')
+
+
+def test_feature_tabs_preserve_manager_edits_and_scope_shortcuts(window, tmp_path, monkeypatch):
+    original = review_playlist(window, tmp_path, monkeypatch)[0]
+    window.pages.setCurrentWidget(window.workspace)
+    window.first.setValue(128.010)
+    assert [window.navigation.tabText(i) for i in range(window.navigation.count())] == ['Manager','Imports','Organiser','Backups','Settings']
+    window.tabs.setCurrentWidget(window.usage_tab)
+    assert window.navigation.currentIndex() == window.tabs.indexOf(window.usage_tab)
+    window.usage_tab.search.setFocus()
+    window.update_play_shortcut(None, window.usage_tab.search)
+    assert not window.play_shortcut.isEnabled()
+    assert all(not shortcut.isEnabled() for shortcut in window.track_shortcuts)
+    window.tabs.setCurrentWidget(window.manager_tab)
+    assert window.selected() is original and original.first_drop == 128.010 and original.cues_dirty
+
+
+def test_usage_filters_search_and_pagination(window):
+    page = window.usage_tab
+    page.scan = usage_results(250)
+    page.apply_filters()
+    assert len(page.matches) == 249 and all(t.playlists == 0 for t in page.matches)
+    page.filter.setCurrentIndex(page.filter.findData('unplayed'))
+    assert [t.id for t in page.matches] == ['zero']
+    page.filter.setCurrentIndex(page.filter.findData('both'))
+    assert [t.id for t in page.matches] == ['zero']
+    page.filter.setCurrentIndex(page.filter.findData('unknown'))
+    assert [t.id for t in page.matches] == ['unknown']
+    page.filter.setCurrentIndex(page.filter.findData('played'))
+    assert 'history' in [t.id for t in page.matches] and 'zero' not in [t.id for t in page.matches]
+    page.filter.setCurrentIndex(page.filter.findData('all'))
+    assert page.next.isEnabled() and len(page.matches) == 250
+    assert page.list.widget().layout().count() == 101  # 100 rows plus stretch.
+    page.next.click()
+    page.next.click()
+    assert page.page == 2 and not page.next.isEnabled()
+    assert page.list.widget().layout().count() == 51
+    page.search.setText('alice quiet')
+    page.apply_filters()
+    assert page.page == 0 and [t.id for t in page.matches] == ['zero']
+    page.search.setText('no matching track')
+    page.apply_filters()
+    assert not page.matches and '0–0' in page.page_label.text()
+
+
+def finish_usage_worker(page):
+    from PySide6.QtTest import QTest
+    for _ in range(500):
+        QApplication.processEvents()
+        if not page.scanning:
+            return
+        QTest.qWait(10)
+    pytest.fail('Usage worker did not finish')
+
+
+def test_usage_background_scan_and_failed_rescan_clear_results(window, monkeypatch):
+    from types import SimpleNamespace
+    page = window.usage_tab
+    page.set_library(SimpleNamespace(path='/test/master.db', demo=False, connect=lambda: None))
+    monkeypatch.setattr('rekordbox_manager.usage_ui.scan_usage', lambda *args: usage_results())
+    page.scan_button.click()
+    assert page.scanning and not page.scan_button.isEnabled()
+    finish_usage_worker(page)
+    assert page.scan is not None and '3 tracks' in page.summary.text()
+    def fail(*args):
+        raise ValueError('Library changed; reconnect')
+    monkeypatch.setattr('rekordbox_manager.usage_ui.scan_usage', fail)
+    page.scan_button.click()
+    finish_usage_worker(page)
+    assert page.scan is None and not page.matches
+    assert 'reconnect' in page.message.text() and page.scan_button.isEnabled()
+
+
+def test_usage_switch_library_discards_inflight_scan(window, monkeypatch):
+    from types import SimpleNamespace
+    from threading import Event
+    page = window.usage_tab
+    release = Event()
+    def scan(*args):
+        release.wait(2)
+        return usage_results()
+    monkeypatch.setattr('rekordbox_manager.usage_ui.scan_usage', scan)
+    page.set_library(SimpleNamespace(path='/first/master.db',demo=False,connect=lambda: None))
+    page.start_scan()
+    page.set_library(SimpleNamespace(path='/second/master.db',demo=False,connect=lambda: None))
+    release.set()
+    finish_usage_worker(page)
+    assert page.scan is None and not page.matches
+    assert page.source.text() == '/second/master.db' and page.scan_button.isEnabled()
+
+
+def test_usage_scan_cancels_and_blocks_import(window, tmp_path, monkeypatch):
+    from types import SimpleNamespace
+    from threading import Event
+    proposals, calls, _ = prepare_apply(window, tmp_path, monkeypatch)
+    page = window.usage_tab
+    release = Event()
+    def scan(*args):
+        release.wait(2)
+        return usage_results()
+    monkeypatch.setattr('rekordbox_manager.usage_ui.scan_usage', scan)
+    page.set_library(SimpleNamespace(path='/test/master.db',demo=False,connect=lambda: None))
+    errors = []
+    monkeypatch.setattr(window, 'fail', errors.append)
+    page.start_scan()
+    window.apply_changes()
+    assert not calls and 'scan' in errors[-1]
+    page.cancel_scan()
+    release.set()
+    finish_usage_worker(page)
+    assert page.scan is None and page.message.text() == 'Scan cancelled.'
