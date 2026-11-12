@@ -475,7 +475,7 @@ def run(output: Path):
         first_identity = window.wave.proposal.track.id
         QTest.keyClick(window.wave, Qt.Key_Down)
         assert window.table.currentRow() == 1 and window.wave.proposal.track.id != first_identity
-        assert window.player.source().toLocalFile() == str(window.wave.proposal.track.path)
+        assert window.player.source() == QUrl.fromLocalFile(str(window.wave.proposal.track.path))
         QTest.keyClick(window.wave, Qt.Key_Up)
         assert window.table.currentRow() == 0 and window.wave.proposal.track.id == first_identity
         deadline = time.monotonic() + 8
