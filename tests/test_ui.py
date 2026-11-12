@@ -292,6 +292,10 @@ def test_deck_above_playlist_and_footer_stays_visible(window, tmp_path, monkeypa
     window.resize(*size)
     window.show()
     QApplication.processEvents()
+    # The Windows CI desktop clamps a window's initial show to its small screen.
+    # Apply the requested test geometry after that initial native resize.
+    window.resize(*size)
+    QApplication.processEvents()
     assert window.size().width() == size[0]
     assert window.size().height() == size[1]
     assert window.navigation.mapTo(window, QPoint(0, window.navigation.height())).y() < window.review_controls.mapTo(window, QPoint(0, 0)).y()

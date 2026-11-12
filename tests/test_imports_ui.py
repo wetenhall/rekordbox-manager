@@ -171,6 +171,10 @@ def test_imports_matches_compact_manager_rows(window, tmp_path, monkeypatch, siz
     window.resize(*size)
     window.show()
     QApplication.processEvents()
+    # The Windows CI desktop clamps a window's initial show to its small screen.
+    # Apply the requested test geometry after that initial native resize.
+    window.resize(*size)
+    QApplication.processEvents()
     assert window.width() == size[0]
     assert len(page.table._buttons) == 6
     assert page.table._buttons[0].property('needsReview')

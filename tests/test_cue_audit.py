@@ -347,6 +347,10 @@ def test_manager_modes_keep_waveform_at_top_and_filters_in_playlist(window, tmp_
     window.resize(*size)
     window.show()
     QApplication.processEvents()
+    # The Windows CI desktop clamps a window's initial show to its small screen.
+    # Apply the requested test geometry after that initial native resize.
+    window.resize(*size)
+    QApplication.processEvents()
     baseline = (window.deck_splitter.widget(0).mapTo(window, QPoint()).y(), window.first.x(), window.second.x(), window.first.width())
     for mode, results in ((0, {}), (1, {}), (1, {track.id: checked}), (0, {})):
         window.scan_mode.setCurrentIndex(mode)
