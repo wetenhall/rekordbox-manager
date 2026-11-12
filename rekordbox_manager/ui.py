@@ -703,13 +703,6 @@ class MainWindow(QMainWindow):
         self.anchor_controls.setLayout(anchors)
         for control in self.anchor_controls.findChildren(QPushButton):
             control.setStyleSheet('padding: 6px 6px;')
-        # Native Windows button minimums can redistribute the drop controls when
-        # the review actions change. Keep these fixed-label controls text-sized.
-        for control in (zoom_first, kick_first, zoom_second, kick_second):
-            control.ensurePolished()
-            control.setFixedWidth(control.fontMetrics().horizontalAdvance(control.text()) + 16)
-        for index in (0, 5):
-            anchors.itemAt(index).widget().setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Preferred)
         deck_box.addWidget(self.anchor_controls)
         self.grid_anchor_controls = QWidget()
         self.grid_anchor_controls.setProperty('deckControls', True)

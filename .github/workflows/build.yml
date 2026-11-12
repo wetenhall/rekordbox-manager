@@ -55,7 +55,9 @@ jobs:
           python -m pip install --force-reinstall --no-deps --no-index --find-links build/monterey-wheels numpy==2.2.6 scipy==1.15.3
       - name: Test
         env:
-          QT_QPA_PLATFORM: offscreen
+          # Windows offscreen omits system fonts; use the shipped native backend
+          # for layout and focus tests, just like package_release.py.
+          QT_QPA_PLATFORM: ${{ runner.os == 'Windows' && 'windows' || 'offscreen' }}
         run: python -m pytest -q
       - name: Build
         run: python scripts/build.py
