@@ -258,7 +258,7 @@ def test_replacement_rejects_changed_source_before_edit_and_before_queue(window,
     track, checked = correction_playlist(window, tmp_path, monkeypatch)
     track.path.write_bytes(b'changed audio data')
     window.confirm_review()
-    assert not window.import_queue.entries and 'changed since checking' in window.status.text()
+    assert not window.import_queue.entries and 'changed since checking' in window.status.full_text
     with pytest.raises(ValueError, match='changed since checking'):
         checked.replacement(track)
 
@@ -289,7 +289,7 @@ def test_keep_originals_revokes_queued_replacement_and_can_be_reversed(window, t
     assert window.keep_original_button.text() == 'Original cues kept'
     assert not window.keep_original_button.isEnabled()
     assert window.confirm_review_button.isEnabled()
-    assert '0 flagged' in window.review_summary.text()
+    assert '0 flagged' in window.review_summary.full_text
     assert track == original and track.path.read_bytes() == b'original audio'
     window.table.selectRow(1)
     window.table.selectRow(0)
@@ -481,7 +481,7 @@ def test_audit_decisions_advance_skip_resolved_and_wrap(window, tmp_path, monkey
         assert window.second.value() == window.selected().second_drop
     resolve()
     assert not any(window.audit_needs_review(t.id) for t in window.tracks)
-    assert 'No tracks left to review' in window.status.text()
+    assert 'No tracks left to review' in window.status.full_text
     assert window.table.currentRow() == (0 if filter_index == 0 else -1)
     assert set(window.import_queue.entries) == ({'4'} if action == 'keep' else {'0', '2', '4', '5'})
 

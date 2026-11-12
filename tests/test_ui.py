@@ -577,7 +577,7 @@ def test_unchanged_kick_selects_drop_two_and_explicit_alignment_preserves_confli
     window.snap_drop_to_kick(2)
     assert p.second_drop==153.601 and p.second_drop_edited and p.grid_anchor==2
     assert p.cues_dirty and p.grid==previous
-    assert 'Align to Drop 2' in window.status.text()
+    assert 'Align to Drop 2' in window.status.full_text
     window.grid_anchor_buttons[1].click()
     assert p.grid.times[p.grid.nearest_downbeat(153.601)]==153.601
     assert (p.first_drop,p.second_drop)==(43.798,153.601)
@@ -619,11 +619,11 @@ def test_snap_to_kick_leaves_ambiguous_marker_unchanged(window,tmp_path,monkeypa
     p.attacks=[Attack(383.9,1),Attack(384.1,1)]
     window.snap_drop_to_kick(2)
     assert p.second_drop==384 and not p.cues_dirty
-    assert 'Two nearby attacks' in window.status.text()
+    assert 'Two nearby attacks' in window.status.full_text
     assert p.drop_notes
     p.attacks=[]
     window.snap_drop_to_kick(2)
-    assert p.second_drop==384 and 'No distinct' in window.status.text()
+    assert p.second_drop==384 and 'No distinct' in window.status.full_text
     p.options=Options(True,False)
     window.update_details()
     assert all(not button.isEnabled() for button in window.kick_buttons)
@@ -712,7 +712,7 @@ def test_settings_save_failure_does_not_block_connected_library(window,tmp_path,
     window.confirm.setChecked(True)
     window.enter()
     assert window.pages.currentWidget() is window.workspace
-    assert 'could not be saved' in window.status.text()
+    assert 'could not be saved' in window.status.full_text
 
 
 def test_edited_second_drop_shifts_grid_without_snapping_back(window,tmp_path,monkeypatch):
@@ -965,7 +965,7 @@ def test_ignore_cued_excludes_all_saved_cue_types_from_scan_scope_and_import(win
     tracks, calls, analysed = ignore_cued_library(window, tmp_path, monkeypatch)
     window.ignore_cued.setChecked(True)
     assert [t.id for t in window.tracks] == ['4', '5']
-    assert window.ignored_track_count == 4 and '4 tracks with existing cues ignored' in window.status.text()
+    assert window.ignored_track_count == 4 and '4 tracks with existing cues ignored' in window.status.full_text
     window.start_analysis()
     assert not window.ignore_cued.isEnabled()
     finish_review_worker(window)
@@ -1260,7 +1260,7 @@ def test_confirm_review_moves_forward_from_middle_and_zooms_next_drop(window, tm
     assert window.selected() is proposals[0]
     window.confirm_review_button.click()
     assert all(p.reviewed for p in proposals)
-    assert 'No tracks left to review' in window.status.text()
+    assert 'No tracks left to review' in window.status.full_text
     assert window.table.currentRow() == (-1 if filtered else 0)
 
 

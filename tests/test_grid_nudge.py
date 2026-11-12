@@ -9,6 +9,7 @@ from rekordbox_manager.grid_nudge import nudge_grid
 from rekordbox_manager.analysis import rebuild_proposal, confirm_proposal_review
 from rekordbox_manager.grid_writer import tempo
 from test_ui import window
+from test_cue_writer import supported_install
 from test_cue_audit import correction_playlist
 
 

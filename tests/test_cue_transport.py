@@ -167,7 +167,7 @@ def test_check_cues_mouse_focus_restores_space_and_arrows_load_audited_tracks(wi
         assert state['state'] == QMediaPlayer.PausedState
         QTest.keyClick(window.wave, Qt.Key_Down)
         assert window.table.currentRow() == 1 and window.wave.proposal.track.id == other.id
-        assert state['source'].toLocalFile() == str(other.path)
+        assert state['source'] == QUrl.fromLocalFile(str(other.path))
         QTest.keyClick(window.wave, Qt.Key_Up)
         assert window.table.currentRow() == 0 and window.wave.proposal.track.id == track.id
     window.audit_tolerance.setFocus()
